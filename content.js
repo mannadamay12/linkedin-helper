@@ -1,13 +1,790 @@
 // LinkedIn Connection Helper - Content Script
 console.log('LinkedIn Connection Helper loaded!');
 
+// Resource Management System - Prevents memory leaks
+class ResourceManager {
+  constructor() {
+    this.listeners = new Set();
+    this.observers = new Set();
+    this.timers = new Set();
+    this.cleanup = this.cleanup.bind(this);
+    
+    // Auto-cleanup on page unload
+    window.addEventListener('beforeunload', this.cleanup);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.cleanup();
+    });
+  }
+
+  addListener(element, event, handler, options = {}) {
+    const listenerData = { element, event, handler, options };
+    element.addEventListener(event, handler, options);
+    this.listeners.add(listenerData);
+    return () => this.removeListener(listenerData);
+  }
+
+  removeListener(listenerData) {
+    const { element, event, handler, options } = listenerData;
+    element.removeEventListener(event, handler, options);
+    this.listeners.delete(listenerData);
+  }
+
+  addObserver(observer, target, options) {
+    observer.observe(target, options);
+    this.observers.add(observer);
+    return () => this.removeObserver(observer);
+  }
+
+  removeObserver(observer) {
+    observer.disconnect();
+    this.observers.delete(observer);
+  }
+
+  addTimer(timerId) {
+    this.timers.add(timerId);
+    return () => this.removeTimer(timerId);
+  }
+
+  removeTimer(timerId) {
+    clearTimeout(timerId);
+    this.timers.delete(timerId);
+  }
+
+  cleanup() {
+    console.log('[LI Helper] Cleaning up resources...');
+    
+    // Remove all event listeners
+    this.listeners.forEach(listenerData => {
+      this.removeListener(listenerData);
+    });
+    
+    // Disconnect all observers
+    this.observers.forEach(observer => {
+      observer.disconnect();
+    });
+    
+    // Clear all timers
+    this.timers.forEach(timerId => {
+      clearTimeout(timerId);
+    });
+    
+    console.log(`[LI Helper] Cleaned up ${this.listeners.size + this.observers.size + this.timers.size} resources`);
+  }
+}
+
+// Resilient DOM Element Finding System - Adapts to LinkedIn UI changes
+class ResilientElementFinder {
+  constructor(resourceManager) {
+    this.resourceManager = resourceManager;
+    this.selectorCache = new Map(); // Cache successful selectors
+    this.failureLog = new Map(); // Track failed selectors
+    this.adaptiveStrategies = new Map(); // Learning strategies
+    this.debug = true;
+    
+    // Initialize strategy success rates
+    this.strategyStats = {
+      'primary': { success: 0, attempts: 0 },
+      'fallback': { success: 0, attempts: 0 },
+      'semantic': { success: 0, attempts: 0 },
+      'structural': { success: 0, attempts: 0 }
+    };
+  }
+
+  log(message, data = null) {
+    if (this.debug) {
+      console.log(`[Resilient Finder] ${message}`, data || '');
+    }
+  }
+
+  // Main method - finds elements with resilience strategies
+  async findElement(elementConfig, options = {}) {
+    const { 
+      maxAttempts = 15, 
+      delay = 200, 
+      timeout = 3000,
+      validator = () => true 
+    } = options;
+
+    const startTime = Date.now();
+    const cacheKey = this.generateCacheKey(elementConfig);
+    
+    // Try cached successful selector first
+    const cachedResult = await this.tryCachedSelector(cacheKey, validator);
+    if (cachedResult) {
+      this.log(`✓ Found using cached selector: ${cachedResult.selector}`);
+      return cachedResult;
+    }
+
+    // Get ordered strategies based on success rates
+    const strategies = this.getOrderedStrategies(elementConfig);
+    
+    return new Promise((resolve) => {
+      let attempts = 0;
+      
+      const tryStrategies = async () => {
+        attempts++;
+        
+        for (const strategy of strategies) {
+          try {
+            this.strategyStats[strategy.type].attempts++;
+            
+            const result = await this.executeStrategy(strategy, validator);
+            if (result) {
+              this.strategyStats[strategy.type].success++;
+              this.cacheSuccessfulSelector(cacheKey, result);
+              
+              this.log(`✓ Found using ${strategy.type} strategy: ${result.selector}`);
+              return resolve(result);
+            }
+          } catch (error) {
+            this.log(`Strategy ${strategy.type} failed:`, error.message);
+            this.recordFailure(strategy, error);
+          }
+        }
+        
+        // Retry if not found and time/attempts remaining
+        const elapsed = Date.now() - startTime;
+        if (attempts < maxAttempts && elapsed < timeout) {
+          const timeoutId = setTimeout(tryStrategies, delay);
+          this.resourceManager.addTimer(timeoutId);
+        } else {
+          this.log(`✗ Element not found after ${attempts} attempts (${elapsed}ms)`);
+          this.recordElementNotFound(elementConfig, strategies);
+          resolve(null);
+        }
+      };
+      
+      tryStrategies();
+    });
+  }
+
+  // Generate cache key from element configuration
+  generateCacheKey(config) {
+    return `${config.type}_${config.purpose || 'default'}`;
+  }
+
+  // Try cached selector if available
+  async tryCachedSelector(cacheKey, validator) {
+    const cached = this.selectorCache.get(cacheKey);
+    if (!cached) return null;
+    
+    try {
+      const element = document.querySelector(cached.selector);
+      if (element && validator(element)) {
+        cached.hits++;
+        return { element, selector: cached.selector, strategy: 'cached' };
+      } else {
+        // Cached selector failed, remove it
+        this.selectorCache.delete(cacheKey);
+        this.log(`Cached selector failed, removed: ${cached.selector}`);
+      }
+    } catch (error) {
+      this.selectorCache.delete(cacheKey);
+    }
+    
+    return null;
+  }
+
+  // Get strategies ordered by success rate
+  getOrderedStrategies(config) {
+    const strategies = this.buildStrategies(config);
+    
+    // Sort by success rate (success/attempts ratio)
+    return strategies.sort((a, b) => {
+      const aRate = this.strategyStats[a.type].attempts > 0 
+        ? this.strategyStats[a.type].success / this.strategyStats[a.type].attempts 
+        : 0.5;
+      const bRate = this.strategyStats[b.type].attempts > 0 
+        ? this.strategyStats[b.type].success / this.strategyStats[b.type].attempts 
+        : 0.5;
+      
+      return bRate - aRate; // Higher success rate first
+    });
+  }
+
+  // Build strategies for different element types
+  buildStrategies(config) {
+    const strategies = [];
+    
+    switch (config.type) {
+      case 'addNoteButton':
+        strategies.push(
+          {
+            type: 'primary',
+            selectors: [
+              'button[aria-label="Add a note"]',
+              'button[data-test-modal-add-note-btn]',
+              '[data-test*="add-note"] button'
+            ]
+          },
+          {
+            type: 'semantic',
+            selectors: [
+              'button:contains("Add a note")',
+              'button[aria-label*="note"]',
+              '[role="button"]:contains("Add a note")'
+            ]
+          },
+          {
+            type: 'structural',
+            selectors: [
+              '.artdeco-modal button[aria-label*="note"]',
+              '[role="dialog"] button:contains("Add")',
+              '.send-invite button'
+            ]
+          },
+          {
+            type: 'fallback',
+            selectors: ['button'],
+            validator: (el) => el.textContent?.trim() === 'Add a note'
+          }
+        );
+        break;
+        
+      case 'nameElement':
+        strategies.push(
+          {
+            type: 'primary',
+            selectors: [
+              '.send-invite__title',
+              '.artdeco-modal__header h1',
+              '.artdeco-modal__header h2'
+            ]
+          },
+          {
+            type: 'semantic',
+            selectors: [
+              '.artdeco-modal h1:first-child',
+              '.artdeco-modal h2:first-child',
+              '[data-test-modal-title]'
+            ]
+          },
+          {
+            type: 'structural',
+            selectors: [
+              '.artdeco-modal strong',
+              '[role="dialog"] strong',
+              '.invitation-card__title'
+            ]
+          },
+          {
+            type: 'fallback',
+            selectors: ['h1', 'h2', 'strong'],
+            validator: (el) => this.isValidName(el.textContent?.trim())
+          }
+        );
+        break;
+        
+      case 'messageTextarea':
+        strategies.push(
+          {
+            type: 'primary',
+            selectors: [
+              'textarea[name="message"]',
+              '#custom-message',
+              'textarea[id*="message"]'
+            ]
+          },
+          {
+            type: 'semantic',
+            selectors: [
+              '.send-invite__custom-message textarea',
+              '.artdeco-modal textarea',
+              '[role="dialog"] textarea'
+            ]
+          },
+          {
+            type: 'structural',
+            selectors: [
+              '.artdeco-modal textarea',
+              '[data-test*="message"] textarea'
+            ]
+          },
+          {
+            type: 'fallback',
+            selectors: ['textarea'],
+            validator: (el) => {
+              const modal = el.closest('.artdeco-modal') || el.closest('[role="dialog"]');
+              return modal !== null && !el.disabled;
+            }
+          }
+        );
+        break;
+    }
+    
+    return strategies;
+  }
+
+  // Execute a specific strategy
+  async executeStrategy(strategy, validator) {
+    for (const selector of strategy.selectors) {
+      try {
+        const element = this.findElementWithCustomSelectors(selector, strategy);
+        if (element && validator(element) && (!strategy.validator || strategy.validator(element))) {
+          return { element, selector, strategy: strategy.type };
+        }
+      } catch (error) {
+        this.log(`Selector failed: ${selector}`, error.message);
+      }
+    }
+    return null;
+  }
+
+  // Enhanced element finding with custom pseudo-selectors
+  findElementWithCustomSelectors(selector, strategy) {
+    // Handle :contains() pseudo-selector
+    if (selector.includes(':contains(')) {
+      return this.findByContainsText(selector);
+    }
+    
+    // Standard querySelector
+    return document.querySelector(selector);
+  }
+
+  // Custom :contains() implementation
+  findByContainsText(selector) {
+    const match = selector.match(/^(.+):contains\("([^"]+)"\)$/);
+    if (!match) return null;
+    
+    const [, baseSelector, text] = match;
+    const elements = document.querySelectorAll(baseSelector || '*');
+    
+    for (const element of elements) {
+      if (element.textContent?.includes(text)) {
+        return element;
+      }
+    }
+    
+    return null;
+  }
+
+  // Validate if text looks like a person's name
+  isValidName(text) {
+    if (!text || text.length < 2 || text.length > 50) return false;
+    
+    const excludeWords = ['add', 'note', 'connect', 'invite', 'send', 'message', 'save', 'cancel', 'close'];
+    const isExcluded = excludeWords.some(word => text.toLowerCase().includes(word));
+    
+    return !isExcluded && 
+           /^[A-Za-z\s\.\-']{2,}$/.test(text) && 
+           text.split(' ').length <= 4 &&
+           !text.includes('@');
+  }
+
+  // Cache successful selector
+  cacheSuccessfulSelector(cacheKey, result) {
+    this.selectorCache.set(cacheKey, {
+      selector: result.selector,
+      strategy: result.strategy,
+      timestamp: Date.now(),
+      hits: 1
+    });
+    
+    this.log(`Cached successful selector: ${result.selector}`);
+  }
+
+  // Record strategy failure
+  recordFailure(strategy, error) {
+    const key = `${strategy.type}_${strategy.selectors.join(',')}`;
+    if (!this.failureLog.has(key)) {
+      this.failureLog.set(key, []);
+    }
+    
+    this.failureLog.get(key).push({
+      error: error.message,
+      timestamp: Date.now(),
+      url: window.location.href
+    });
+  }
+
+  // Record element not found
+  recordElementNotFound(config, strategies) {
+    this.log(`Element not found: ${config.type}`, {
+      strategies: strategies.map(s => s.type),
+      strategyStats: this.strategyStats,
+      cacheSize: this.selectorCache.size,
+      failures: this.failureLog.size
+    });
+  }
+
+  // Get performance statistics
+  getStats() {
+    const stats = {
+      strategies: { ...this.strategyStats },
+      cache: {
+        size: this.selectorCache.size,
+        entries: Array.from(this.selectorCache.entries()).map(([key, value]) => ({
+          key,
+          selector: value.selector,
+          hits: value.hits,
+          age: Date.now() - value.timestamp
+        }))
+      },
+      failures: this.failureLog.size
+    };
+    
+    // Calculate success rates
+    Object.keys(stats.strategies).forEach(strategy => {
+      const stat = stats.strategies[strategy];
+      stat.successRate = stat.attempts > 0 ? (stat.success / stat.attempts * 100).toFixed(1) + '%' : '0%';
+    });
+    
+    return stats;
+  }
+
+  // Clear cache and reset stats (for testing)
+  reset() {
+    this.selectorCache.clear();
+    this.failureLog.clear();
+    Object.keys(this.strategyStats).forEach(key => {
+      this.strategyStats[key] = { success: 0, attempts: 0 };
+    });
+    this.log('Reset selector cache and statistics');
+  }
+}
+
+// Operation Queue System - Prevents race conditions and manages async operations
+class OperationQueue {
+  constructor(resourceManager) {
+    this.resourceManager = resourceManager;
+    this.queue = [];
+    this.isProcessing = false;
+    this.activeOperations = new Map();
+    this.operationHistory = [];
+    this.maxHistorySize = 100;
+    this.debug = true;
+    
+    // Operation types and their priorities
+    this.operationPriorities = {
+      'connect_button_click': 10,
+      'modal_detection': 8,
+      'textarea_detection': 6,
+      'message_insertion': 4,
+      'cleanup': 2
+    };
+    
+    // Retry configuration
+    this.retryConfig = {
+      maxRetries: 3,
+      baseDelay: 1000, // 1 second
+      maxDelay: 8000,  // 8 seconds max
+      backoffMultiplier: 2
+    };
+  }
+
+  log(message, data = null) {
+    if (this.debug) {
+      console.log(`[Operation Queue] ${message}`, data || '');
+    }
+  }
+
+  // Add operation to queue with priority and retry logic
+  async enqueue(operationType, operation, options = {}) {
+    const {
+      priority = this.operationPriorities[operationType] || 5,
+      timeout = 10000,
+      retryable = true,
+      onRetry = null,
+      onSuccess = null,
+      onFailure = null,
+      metadata = {}
+    } = options;
+
+    const operationId = this.generateOperationId();
+    
+    const queuedOperation = {
+      id: operationId,
+      type: operationType,
+      operation,
+      priority,
+      timeout,
+      retryable,
+      attempts: 0,
+      maxRetries: this.retryConfig.maxRetries,
+      onRetry,
+      onSuccess,
+      onFailure,
+      metadata,
+      createdAt: Date.now(),
+      status: 'queued'
+    };
+
+    // Insert operation in priority order
+    const insertIndex = this.queue.findIndex(op => op.priority < priority);
+    if (insertIndex === -1) {
+      this.queue.push(queuedOperation);
+    } else {
+      this.queue.splice(insertIndex, 0, queuedOperation);
+    }
+
+    this.log(`Queued operation ${operationType} (ID: ${operationId}) with priority ${priority}`);
+    
+    // Start processing if not already running
+    this.processQueue();
+    
+    // Return a promise that resolves when this specific operation completes
+    return new Promise((resolve, reject) => {
+      queuedOperation.resolve = resolve;
+      queuedOperation.reject = reject;
+    });
+  }
+
+  // Process the queue
+  async processQueue() {
+    if (this.isProcessing || this.queue.length === 0) {
+      return;
+    }
+
+    this.isProcessing = true;
+    this.log(`Processing queue with ${this.queue.length} operations`);
+
+    while (this.queue.length > 0) {
+      const operation = this.queue.shift();
+      await this.executeOperation(operation);
+    }
+
+    this.isProcessing = false;
+    this.log('Queue processing complete');
+  }
+
+  // Execute a single operation with retry logic
+  async executeOperation(operation) {
+    const { id, type, operation: operationFn, timeout, retryable, maxRetries } = operation;
+    
+    operation.status = 'executing';
+    operation.startedAt = Date.now();
+    this.activeOperations.set(id, operation);
+    
+    this.log(`Executing operation ${type} (ID: ${id}), attempt ${operation.attempts + 1}`);
+
+    try {
+      // Create timeout promise
+      const timeoutPromise = new Promise((_, reject) => {
+        const timeoutId = setTimeout(() => {
+          reject(new Error(`Operation ${type} timed out after ${timeout}ms`));
+        }, timeout);
+        
+        // Register timeout for cleanup
+        this.resourceManager.addTimer(timeoutId);
+      });
+
+      // Race between operation and timeout
+      const result = await Promise.race([
+        operationFn(),
+        timeoutPromise
+      ]);
+
+      // Operation succeeded
+      operation.status = 'completed';
+      operation.completedAt = Date.now();
+      operation.result = result;
+      
+      this.activeOperations.delete(id);
+      this.addToHistory(operation);
+      
+      this.log(`✓ Operation ${type} (ID: ${id}) completed successfully in ${operation.completedAt - operation.startedAt}ms`);
+      
+      // Call success callback
+      if (operation.onSuccess) {
+        try {
+          await operation.onSuccess(result);
+        } catch (callbackError) {
+          this.log(`Success callback error for ${type}:`, callbackError);
+        }
+      }
+      
+      // Resolve the promise
+      if (operation.resolve) {
+        operation.resolve(result);
+      }
+      
+    } catch (error) {
+      operation.attempts++;
+      operation.lastError = error;
+      
+      this.log(`✗ Operation ${type} (ID: ${id}) failed:`, error.message);
+      
+      // Check if we should retry
+      if (retryable && operation.attempts < maxRetries) {
+        const delay = this.calculateRetryDelay(operation.attempts);
+        operation.status = 'retrying';
+        
+        this.log(`Retrying operation ${type} (ID: ${id}) in ${delay}ms (attempt ${operation.attempts + 1}/${maxRetries})`);
+        
+        // Call retry callback
+        if (operation.onRetry) {
+          try {
+            await operation.onRetry(error, operation.attempts);
+          } catch (callbackError) {
+            this.log(`Retry callback error for ${type}:`, callbackError);
+          }
+        }
+        
+        // Schedule retry
+        const retryTimeoutId = setTimeout(() => {
+          this.queue.unshift(operation); // Put back at front
+          this.processQueue();
+        }, delay);
+        
+        this.resourceManager.addTimer(retryTimeoutId);
+        
+      } else {
+        // Max retries reached or not retryable
+        operation.status = 'failed';
+        operation.completedAt = Date.now();
+        
+        this.activeOperations.delete(id);
+        this.addToHistory(operation);
+        
+        this.log(`✗ Operation ${type} (ID: ${id}) failed permanently after ${operation.attempts} attempts`);
+        
+        // Call failure callback
+        if (operation.onFailure) {
+          try {
+            await operation.onFailure(error);
+          } catch (callbackError) {
+            this.log(`Failure callback error for ${type}:`, callbackError);
+          }
+        }
+        
+        // Reject the promise
+        if (operation.reject) {
+          operation.reject(error);
+        }
+      }
+    }
+  }
+
+  // Calculate exponential backoff delay
+  calculateRetryDelay(attempt) {
+    const delay = Math.min(
+      this.retryConfig.baseDelay * Math.pow(this.retryConfig.backoffMultiplier, attempt - 1),
+      this.retryConfig.maxDelay
+    );
+    
+    // Add jitter (±25%)
+    const jitter = delay * 0.25 * (Math.random() * 2 - 1);
+    return Math.round(delay + jitter);
+  }
+
+  // Generate unique operation ID
+  generateOperationId() {
+    return 'op_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+  }
+
+  // Add operation to history
+  addToHistory(operation) {
+    this.operationHistory.push({
+      id: operation.id,
+      type: operation.type,
+      status: operation.status,
+      attempts: operation.attempts,
+      duration: operation.completedAt - operation.startedAt,
+      error: operation.lastError?.message,
+      createdAt: operation.createdAt,
+      completedAt: operation.completedAt
+    });
+    
+    // Keep history size manageable
+    if (this.operationHistory.length > this.maxHistorySize) {
+      this.operationHistory = this.operationHistory.slice(-this.maxHistorySize);
+    }
+  }
+
+  // Cancel all pending operations
+  cancelAll() {
+    this.log(`Cancelling ${this.queue.length} pending operations`);
+    
+    // Reject all pending operations
+    this.queue.forEach(operation => {
+      if (operation.reject) {
+        operation.reject(new Error('Operation cancelled'));
+      }
+    });
+    
+    this.queue = [];
+    this.log('All pending operations cancelled');
+  }
+
+  // Get queue statistics
+  getStats() {
+    const stats = {
+      queue: {
+        pending: this.queue.length,
+        processing: this.isProcessing,
+        active: this.activeOperations.size
+      },
+      history: {
+        total: this.operationHistory.length,
+        completed: this.operationHistory.filter(op => op.status === 'completed').length,
+        failed: this.operationHistory.filter(op => op.status === 'failed').length,
+        averageDuration: this.getAverageDuration()
+      },
+      operations: this.getOperationTypeStats()
+    };
+    
+    return stats;
+  }
+
+  // Get average operation duration
+  getAverageDuration() {
+    const completedOps = this.operationHistory.filter(op => op.status === 'completed' && op.duration);
+    if (completedOps.length === 0) return 0;
+    
+    const totalDuration = completedOps.reduce((sum, op) => sum + op.duration, 0);
+    return Math.round(totalDuration / completedOps.length);
+  }
+
+  // Get statistics by operation type
+  getOperationTypeStats() {
+    const typeStats = {};
+    
+    this.operationHistory.forEach(op => {
+      if (!typeStats[op.type]) {
+        typeStats[op.type] = { total: 0, completed: 0, failed: 0, avgDuration: 0 };
+      }
+      
+      typeStats[op.type].total++;
+      if (op.status === 'completed') {
+        typeStats[op.type].completed++;
+      } else if (op.status === 'failed') {
+        typeStats[op.type].failed++;
+      }
+    });
+    
+    // Calculate success rates and average durations
+    Object.keys(typeStats).forEach(type => {
+      const stats = typeStats[type];
+      stats.successRate = stats.total > 0 ? ((stats.completed / stats.total) * 100).toFixed(1) + '%' : '0%';
+      
+      const completedOpsOfType = this.operationHistory.filter(op => 
+        op.type === type && op.status === 'completed' && op.duration
+      );
+      
+      if (completedOpsOfType.length > 0) {
+        const totalDuration = completedOpsOfType.reduce((sum, op) => sum + op.duration, 0);
+        stats.avgDuration = Math.round(totalDuration / completedOpsOfType.length);
+      }
+    });
+    
+    return typeStats;
+  }
+
+  // Clear history
+  clearHistory() {
+    this.operationHistory = [];
+    this.log('Operation history cleared');
+  }
+}
+
 // Enhanced reliability system with comprehensive error handling
 class LinkedInElementFinder {
-  constructor() {
+  constructor(resourceManager = null) {
     this.debug = true;
     this.retryAttempts = 15;
     this.retryDelay = 200;
     this.errorReporter = new ErrorReporter();
+    this.resourceManager = resourceManager; // Store reference for cleanup
   }
 
   log(message, data = null) {
@@ -54,7 +831,11 @@ class LinkedInElementFinder {
         
         // If not found and attempts remaining, retry
         if (attempts < maxAttempts) {
-          setTimeout(tryFind, delay);
+          const retryTimeoutId = setTimeout(tryFind, delay);
+          // Register timeout for cleanup if resourceManager is available
+          if (this.resourceManager) {
+            this.resourceManager.addTimer(retryTimeoutId);
+          }
         } else {
           this.log(`✗ Element not found after ${maxAttempts} attempts`);
           // Log element not found error
@@ -68,126 +849,54 @@ class LinkedInElementFinder {
     });
   }
 
-  // Specific finder methods for different LinkedIn elements
+  // Specific finder methods for different LinkedIn elements - Now using Resilient Finder
   async findAddNoteButton() {
-    const selectorGroups = [
-      {
-        name: 'Primary Add Note Button',
-        selectors: [
-          'button[aria-label="Add a note"]',
-          'button[data-test-modal-add-note-btn]'
-        ],
-        validator: (el) => el.textContent.includes('Add a note') || el.getAttribute('aria-label')?.includes('Add a note')
-      },
-      {
-        name: 'Secondary Add Note Patterns',
-        selectors: [
-          'button[aria-label*="note"]',
-          '[data-test*="note"] button',
-          '.artdeco-modal button[aria-label*="note"]'
-        ],
-        validator: (el) => el.textContent.toLowerCase().includes('note')
-      },
-      {
-        name: 'Fallback Text Search',
-        selectors: ['button'],
-        validator: (el) => el.textContent.trim() === 'Add a note'
+    this.log('🔍 Finding Add Note button using resilient strategies...');
+    
+    const result = await resilientFinder.findElement(
+      { type: 'addNoteButton' },
+      { 
+        validator: (el) => {
+          return el.textContent?.includes('Add a note') || 
+                 el.getAttribute('aria-label')?.includes('Add a note') ||
+                 el.textContent?.trim() === 'Add a note';
+        }
       }
-    ];
+    );
 
-    const result = await this.findElementWithRetry(selectorGroups);
     if (!result) {
-      this.errorReporter.logElementNotFound('button', selectorGroups.flatMap(g => g.selectors), { buttonType: 'Add a note' });
+      this.errorReporter.logElementNotFound('button', ['resilient-strategies'], { 
+        buttonType: 'Add a note',
+        resilientStats: resilientFinder.getStats()
+      });
+    } else {
+      this.log(`✓ Found Add Note button via ${result.strategy}: ${result.selector}`);
     }
+    
     return result;
   }
 
   async findNameElement() {
-    const selectorGroups = [
-      {
-        name: 'Modal Title Elements',
-        selectors: [
-          '.send-invite__title',
-          '.artdeco-modal__header h2',
-          '.artdeco-modal__header h1', 
-          '.artdeco-modal__header strong',
-          '.pv-modal__header strong',
-          // More specific LinkedIn modal selectors
-          '.artdeco-modal h1:first-child',
-          '.artdeco-modal h2:first-child',
-          '.artdeco-modal [data-test-modal-title]',
-          '.send-invite h1',
-          '.send-invite h2',
-          // Additional modal title patterns
-          '.artdeco-modal-header__title',
-          '.artdeco-modal .artdeco-modal-header h1',
-          '.artdeco-modal .artdeco-modal-header h2'
-        ],
+    this.log('🔍 Finding name element using resilient strategies...');
+    
+    const result = await resilientFinder.findElement(
+      { type: 'nameElement' },
+      { 
         validator: (el) => {
           const text = el.textContent?.trim();
-          // More specific validation for modal titles
-          const excludeWords = ['add', 'note', 'connect', 'invite', 'send', 'message', 'save', 'cancel', 'close', 'to', 'how do you know'];
-          const isExcluded = excludeWords.some(word => text.toLowerCase().includes(word.toLowerCase()));
+          if (!text) return false;
           
-          return text && 
-                 text.length > 2 && 
-                 text.length < 100 && 
-                 !isExcluded &&
-                 /^[A-Za-z\s\.\-']{2,}$/.test(text);
-        }
-      },
-      {
-        name: 'Modal Content Strong Tags',
-        selectors: [
-          '.artdeco-modal strong',
-          '[role="dialog"] strong',
-          '.invitation-card__title',
-          '.invitation-card__name'
-        ],
-        validator: (el) => {
-          const text = el.textContent?.trim();
-          // Check if it looks like a name (2-4 words, reasonable length, no numbers)
-          // Exclude common UI text that might be picked up
-          const excludeWords = ['add', 'note', 'connect', 'invite', 'send', 'message', 'save', 'cancel', 'close'];
-          const isExcluded = excludeWords.some(word => text.toLowerCase().includes(word));
-          
-          return text && 
-                 /^[A-Za-z\s\.\-']{2,50}$/.test(text) && 
-                 text.split(' ').length <= 4 && 
-                 !text.includes('@') &&
-                 !isExcluded &&
-                 text.length >= 3; // Names should be at least 3 characters
-        }
-      },
-      {
-        name: 'Generic Header Search',
-        selectors: [
-          '.artdeco-modal h1',
-          '.artdeco-modal h2', 
-          '.artdeco-modal h3',
-          '[role="dialog"] h1',
-          '[role="dialog"] h2'
-        ],
-        validator: (el) => {
-          const text = el.textContent?.trim();
-          // Exclude common UI text that might be picked up
-          const excludeWords = ['add', 'note', 'connect', 'invite', 'send', 'message', 'save', 'cancel', 'close', 'to'];
-          const isExcluded = excludeWords.some(word => text.toLowerCase().includes(word));
-          
-          return text && 
-                 /^[A-Za-z\s\.\-']{2,50}$/.test(text) && 
-                 text.split(' ').length <= 4 && 
-                 !isExcluded &&
-                 text.length >= 3; // Names should be at least 3 characters
+          // Enhanced name validation with resilient finder's isValidName
+          return resilientFinder.isValidName(text);
         }
       }
-    ];
+    );
 
-    const result = await this.findElementWithRetry(selectorGroups);
     if (!result) {
       // Enhanced debugging: log what text elements we found
       const debugInfo = {
         modalPresent: !!document.querySelector('.artdeco-modal'),
+        resilientStats: resilientFinder.getStats(),
         allModalText: [],
         allStrongText: [],
         allHeadings: []
@@ -206,51 +915,51 @@ class LinkedInElementFinder {
         debugInfo.allHeadings = Array.from(modal.querySelectorAll('h1, h2, h3')).map(el => el.textContent?.trim()).filter(Boolean);
       }
       
-      this.errorReporter.logElementNotFound('name', selectorGroups.flatMap(g => g.selectors), debugInfo);
+      this.errorReporter.logElementNotFound('name', ['resilient-strategies'], debugInfo);
       this.log('Name detection debug info:', debugInfo);
     } else {
-      this.log(`Name element found with text: "${result.element.textContent?.trim()}"`);
+      this.log(`✓ Found name element via ${result.strategy}: "${result.element.textContent?.trim()}" using ${result.selector}`);
     }
+    
     return result;
   }
 
   async findMessageTextarea() {
-    const selectorGroups = [
-      {
-        name: 'Primary Message Fields',
-        selectors: [
-          'textarea[name="message"]',
-          '#custom-message',
-          'textarea[id*="message"]'
-        ],
-        validator: (el) => el.tagName === 'TEXTAREA'
-      },
-      {
-        name: 'Modal Textarea Elements', 
-        selectors: [
-          '.send-invite__custom-message textarea',
-          '.artdeco-modal textarea',
-          '[role="dialog"] textarea'
-        ],
-        validator: (el) => el.tagName === 'TEXTAREA' && !el.disabled
-      },
-      {
-        name: 'Fallback Textarea Search',
-        selectors: ['textarea'],
+    this.log('🔍 Finding message textarea using resilient strategies...');
+    
+    const result = await resilientFinder.findElement(
+      { type: 'messageTextarea' },
+      { 
         validator: (el) => {
+          // Must be a textarea element
+          if (el.tagName !== 'TEXTAREA') return false;
+          
+          // Must not be disabled
+          if (el.disabled) return false;
+          
+          // Must be within a modal
           const modal = el.closest('.artdeco-modal') || el.closest('[role="dialog"]');
-          return modal !== null && !el.disabled;
+          return modal !== null;
         }
       }
-    ];
+    );
 
-    const result = await this.findElementWithRetry(selectorGroups);
     if (!result) {
-      this.errorReporter.logElementNotFound('textarea', selectorGroups.flatMap(g => g.selectors), { 
+      this.errorReporter.logElementNotFound('textarea', ['resilient-strategies'], { 
         modalPresent: !!document.querySelector('.artdeco-modal'),
-        addNoteClicked: true 
+        addNoteClicked: true,
+        resilientStats: resilientFinder.getStats(),
+        availableTextareas: Array.from(document.querySelectorAll('textarea')).map(t => ({
+          name: t.name,
+          id: t.id,
+          disabled: t.disabled,
+          inModal: !!(t.closest('.artdeco-modal') || t.closest('[role="dialog"]'))
+        }))
       });
+    } else {
+      this.log(`✓ Found message textarea via ${result.strategy}: ${result.selector}`);
     }
+    
     return result;
   }
 
@@ -1447,13 +2156,22 @@ class ErrorReporter {
   }
 }
 
+// Initialize resource manager first to handle cleanup
+const resourceManager = new ResourceManager();
+
+// Initialize operation queue for race condition prevention
+const operationQueue = new OperationQueue(resourceManager);
+
+// Initialize resilient finder for adaptive DOM element detection
+const resilientFinder = new ResilientElementFinder(resourceManager);
+
 // Initialize storage manager, element finder and template processor
 const storageManager = new StorageManager();
-const elementFinder = new LinkedInElementFinder();
+const elementFinder = new LinkedInElementFinder(resourceManager);
 const templateProcessor = new TemplateProcessor(storageManager);
 
 // Ensure global objects are available after initialization
-setTimeout(() => {
+const globalSetupTimeoutId = setTimeout(() => {
   console.log('[LI Helper] Setting up global debug objects...');
   if (typeof window.liHelperStorage === 'undefined') {
     console.log('[LI Helper] liHelperStorage not found, creating it...');
@@ -1463,11 +2181,14 @@ setTimeout(() => {
   }
 }, 1000);
 
+// Register timeout for cleanup
+resourceManager.addTimer(globalSetupTimeoutId);
+
 // Extension state
 let extensionEnabled = true;
 
-// Listen for clicks on Connect buttons
-document.addEventListener('click', function(e) {
+// Listen for clicks on Connect buttons - Now with OperationQueue and proper cleanup
+const connectButtonHandler = function(e) {
   // Check if extension is enabled
   if (!extensionEnabled) {
     return;
@@ -1482,15 +2203,42 @@ document.addEventListener('click', function(e) {
     target.closest('[aria-label*="Connect"]');
     
   if (isConnectButton) {
-    elementFinder.log('Connect button clicked!');
-    waitForConnectionModal();
+    elementFinder.log('Connect button clicked! Queuing connection flow...');
+    
+    // Queue the connection operation to prevent race conditions
+    operationQueue.enqueue('connect_button_click', async () => {
+      await waitForConnectionModal();
+    }, {
+      timeout: 15000,
+      retryable: false, // Don't retry click events
+      metadata: {
+        buttonElement: target,
+        url: window.location.href,
+        timestamp: Date.now()
+      },
+      onSuccess: () => {
+        elementFinder.log('✓ Connection flow completed successfully');
+      },
+      onFailure: (error) => {
+        elementFinder.log('✗ Connection flow failed:', error.message);
+        showNotification('⚠️ Connection flow failed. Please try again.', 'error');
+      }
+    }).catch(error => {
+      elementFinder.log('Connection flow queue error:', error.message);
+    });
   }
-});
+};
 
-// Smart modal detection using MutationObserver instead of setTimeout
-function waitForConnectionModal() {
+// Add listener through resource manager for proper cleanup
+resourceManager.addListener(document, 'click', connectButtonHandler);
+
+// Smart modal detection using MutationObserver and OperationQueue
+async function waitForConnectionModal() {
   elementFinder.log('Waiting for connection modal to appear...');
   
+  // Queue modal detection to prevent overlapping operations
+  return operationQueue.enqueue('modal_detection', async () => {
+    return new Promise((resolve, reject) => {
   let attempts = 0;
   const maxAttempts = 50; // 5 seconds at 100ms intervals
   const startTime = Date.now();
@@ -1508,8 +2256,8 @@ function waitForConnectionModal() {
     if (modalExists) {
       const actualTime = Date.now() - startTime;
       elementFinder.log(`✓ Modal detected after ${actualTime}ms`);
-          obs.disconnect();
-      fillConnectionMessage();
+          removeObserver(); // Use cleanup function
+          resolve(modalExists);
       return;
     }
     
@@ -1517,7 +2265,7 @@ function waitForConnectionModal() {
     if (attempts >= maxAttempts) {
       const actualTime = Date.now() - startTime;
       elementFinder.log(`✗ Modal not detected after ${actualTime}ms`);
-          obs.disconnect();
+          removeObserver(); // Use cleanup function
       
       // Log timing error with comprehensive details
       elementFinder.errorReporter.logTimingError(
@@ -1531,17 +2279,12 @@ function waitForConnectionModal() {
         }
       );
       
-      // Show user-friendly error with suggestions
-      elementFinder.errorReporter.showUserError(
-        '⚠️ Connection modal not detected. Try clicking Connect again.',
-        'error',
-        ['Refresh the page', 'Check internet connection', 'Try different profile']
-      );
-    }
-  });
-  
-  // Start observing for DOM changes
-      observer.observe(document.body, {
+          reject(new Error('Connection modal not detected after timeout'));
+        }
+      });
+      
+      // Register observer with resource manager for proper cleanup
+      const removeObserver = resourceManager.addObserver(observer, document.body, {
         childList: true,
     subtree: true,
     attributes: true,
@@ -1549,17 +2292,48 @@ function waitForConnectionModal() {
       });
       
   // Also do an immediate check in case modal is already there
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
     const modalExists = 
       document.querySelector('.artdeco-modal') ||
       document.querySelector('[role="dialog"]');
     
     if (modalExists) {
       elementFinder.log('✓ Modal already present, proceeding immediately');
-        observer.disconnect();
-      fillConnectionMessage();
+          removeObserver(); // Use cleanup function
+          resolve(modalExists);
     }
   }, 100);
+      
+      // Register timeout for cleanup
+      resourceManager.addTimer(timeoutId);
+    });
+  }, {
+    timeout: 8000, // 8 second timeout for modal detection
+    retryable: true,
+    onSuccess: async () => {
+      // Queue the message filling operation
+      await operationQueue.enqueue('message_insertion', async () => {
+        await fillConnectionMessage();
+      }, {
+        timeout: 10000,
+        retryable: true,
+        onFailure: (error) => {
+          elementFinder.errorReporter.showUserError(
+            '⚠️ Failed to fill connection message.',
+            'error',
+            ['Try clicking Connect again', 'Check if modal is responsive']
+          );
+        }
+      });
+    },
+    onFailure: (error) => {
+      elementFinder.errorReporter.showUserError(
+        '⚠️ Connection modal not detected. Try clicking Connect again.',
+        'error',
+        ['Refresh the page', 'Check internet connection', 'Try different profile']
+      );
+    }
+  });
 }
 
 async function fillConnectionMessage() {
@@ -1597,8 +2371,20 @@ async function fillConnectionMessage() {
     try {
       addNoteResult.element.click();
       
-      // Wait for textarea to appear using MutationObserver
-      waitForTextareaAndInsert();
+      // Queue textarea detection to prevent race conditions
+      await operationQueue.enqueue('textarea_detection', async () => {
+        await waitForTextareaAndInsert();
+      }, {
+        timeout: 5000,
+        retryable: true,
+        onFailure: (error) => {
+          elementFinder.errorReporter.showUserError(
+            '⚠️ Message box not found after clicking "Add a note".',
+            'error',
+            ['Try clicking "Add a note" button manually', 'Wait for modal to fully load', 'Refresh the page']
+          );
+        }
+      });
       
     } catch (clickError) {
       elementFinder.errorReporter.logModalError(
@@ -1639,10 +2425,11 @@ async function fillConnectionMessage() {
   }
 }
 
-// Wait for textarea to appear after clicking "Add a note"
-function waitForTextareaAndInsert() {
+// Wait for textarea to appear after clicking "Add a note" - Now returns Promise
+async function waitForTextareaAndInsert() {
   elementFinder.log('Waiting for message textarea to appear...');
   
+  return new Promise((resolve, reject) => {
   let attempts = 0;
   const maxAttempts = 30; // 3 seconds at 100ms intervals
   const startTime = Date.now();
@@ -1661,8 +2448,14 @@ function waitForTextareaAndInsert() {
     if (textareaExists) {
       const actualTime = Date.now() - startTime;
       elementFinder.log(`✓ Textarea appeared after ${actualTime}ms`);
-      obs.disconnect();
+        removeTextareaObserver(); // Use cleanup function
+        
+        try {
       await insertPersonalizedMessage();
+          resolve(textareaExists);
+        } catch (error) {
+          reject(error);
+        }
       return;
     }
     
@@ -1670,7 +2463,7 @@ function waitForTextareaAndInsert() {
     if (attempts >= maxAttempts) {
       const actualTime = Date.now() - startTime;
       elementFinder.log(`✗ Textarea not found after ${actualTime}ms`);
-      obs.disconnect();
+        removeTextareaObserver(); // Use cleanup function
       
       // Log timing error with comprehensive details
       elementFinder.errorReporter.logTimingError(
@@ -1689,17 +2482,12 @@ function waitForTextareaAndInsert() {
         }
       );
       
-      // Show user-friendly error with suggestions
-      elementFinder.errorReporter.showUserError(
-        '⚠️ Message box not found. Try manually clicking "Add a note".',
-        'error',
-        ['Click "Add a note" button manually', 'Wait for modal to fully load', 'Refresh the page']
-      );
-    }
-  });
-  
-  // Start observing for DOM changes
-  observer.observe(document.body, {
+        reject(new Error('Message box not found after timeout'));
+      }
+    });
+    
+    // Register textarea observer with resource manager for proper cleanup
+    const removeTextareaObserver = resourceManager.addObserver(observer, document.body, {
     childList: true,
     subtree: true,
     attributes: true,
@@ -1707,7 +2495,7 @@ function waitForTextareaAndInsert() {
   });
   
   // Also do an immediate check in case textarea is already there
-  setTimeout(async () => {
+    const textareaTimeoutId = setTimeout(async () => {
     const textareaExists = 
       document.querySelector('textarea[name="message"]') ||
       document.querySelector('#custom-message') ||
@@ -1715,10 +2503,20 @@ function waitForTextareaAndInsert() {
     
     if (textareaExists) {
       elementFinder.log('✓ Textarea already present, proceeding immediately');
-      observer.disconnect();
+        removeTextareaObserver(); // Use cleanup function
+        
+        try {
       await insertPersonalizedMessage();
+          resolve(textareaExists);
+        } catch (error) {
+          reject(error);
+        }
     }
   }, 50);
+    
+    // Register timeout for cleanup
+    resourceManager.addTimer(textareaTimeoutId);
+  });
 }
 
 async function insertPersonalizedMessage() {
@@ -1966,10 +2764,14 @@ function showNotification(message, type = 'info') {
   notification.innerText = message;
   document.body.appendChild(notification);
   
-  setTimeout(() => {
+  // Use resourceManager for notification timers
+  const notificationTimeoutId = setTimeout(() => {
     notification.style.animation = 'slideOut 0.3s ease-in';
-    setTimeout(() => notification.remove(), 300);
+    const removeTimeoutId = setTimeout(() => notification.remove(), 300);
+    resourceManager.addTimer(removeTimeoutId);
   }, 3000);
+  
+  resourceManager.addTimer(notificationTimeoutId);
 }
 
 // Show detected information
@@ -2036,10 +2838,14 @@ function showDetectedInfo(info) {
   
   document.body.appendChild(infoDiv);
   
-  setTimeout(() => {
+  // Use resourceManager for info display timers
+  const infoTimeoutId = setTimeout(() => {
     infoDiv.style.animation = 'fadeOut 0.3s ease-in';
-    setTimeout(() => infoDiv.remove(), 300);
+    const infoRemoveTimeoutId = setTimeout(() => infoDiv.remove(), 300);
+    resourceManager.addTimer(infoRemoveTimeoutId);
   }, 5000);
+  
+  resourceManager.addTimer(infoTimeoutId);
 }
 
 // Add floating control button
@@ -2066,7 +2872,8 @@ toggleButton.style.cssText = `
 
 toggleButton.title = 'LinkedIn Connection Helper (Click to toggle)';
 
-toggleButton.addEventListener('click', () => {
+// Add toggle button listeners with proper cleanup
+resourceManager.addListener(toggleButton, 'click', () => {
   extensionEnabled = !extensionEnabled;
   toggleButton.style.opacity = extensionEnabled ? '1' : '0.5';
   showNotification(
@@ -2075,12 +2882,12 @@ toggleButton.addEventListener('click', () => {
   );
 });
 
-// Add hover effect
-toggleButton.addEventListener('mouseenter', () => {
+// Add hover effects with proper cleanup
+resourceManager.addListener(toggleButton, 'mouseenter', () => {
   toggleButton.style.transform = 'scale(1.1)';
 });
 
-toggleButton.addEventListener('mouseleave', () => {
+resourceManager.addListener(toggleButton, 'mouseleave', () => {
   toggleButton.style.transform = 'scale(1)';
 });
 
@@ -2122,6 +2929,211 @@ window.liHelperDebug = {
   toggleDebug: () => {
     elementFinder.debug = !elementFinder.debug;
     console.log(`[LI Helper] Debug mode: ${elementFinder.debug ? 'ON' : 'OFF'}`);
+  },
+  
+  // Resource management monitoring
+  getResourceStats: () => {
+    const stats = {
+      listeners: resourceManager.listeners.size,
+      observers: resourceManager.observers.size,
+      timers: resourceManager.timers.size,
+      total: resourceManager.listeners.size + resourceManager.observers.size + resourceManager.timers.size
+    };
+    console.log('[LI Helper] Resource usage:', stats);
+    return stats;
+  },
+  
+  forceCleanup: () => {
+    resourceManager.cleanup();
+    console.log('[LI Helper] Manual cleanup completed');
+  },
+  
+  testMemoryLeak: () => {
+    // Add some test resources to verify cleanup works
+    const testElement = document.createElement('div');
+    resourceManager.addListener(testElement, 'click', () => {});
+    
+    const testObserver = new MutationObserver(() => {});
+    resourceManager.addObserver(testObserver, document.body, { childList: true });
+    
+    const testTimer = setTimeout(() => {}, 5000);
+    resourceManager.addTimer(testTimer);
+    
+    console.log('[LI Helper] Added test resources. Use getResourceStats() to check.');
+  },
+  
+  // Resilient DOM finder monitoring and testing
+  getResilientStats: () => {
+    const stats = resilientFinder.getStats();
+    console.log('[LI Helper] Resilient finder performance:', stats);
+    return stats;
+  },
+  
+  testResilientFinder: async () => {
+    console.log('[LI Helper] Testing resilient finder strategies...');
+    
+    const tests = [
+      { type: 'addNoteButton', description: 'Add Note Button' },
+      { type: 'nameElement', description: 'Name Element' },
+      { type: 'messageTextarea', description: 'Message Textarea' }
+    ];
+    
+    const results = {};
+    
+    for (const test of tests) {
+      try {
+        const startTime = Date.now();
+        const result = await resilientFinder.findElement({ type: test.type });
+        const duration = Date.now() - startTime;
+        
+        results[test.type] = {
+          found: !!result,
+          duration: duration + 'ms',
+          strategy: result?.strategy || 'none',
+          selector: result?.selector || 'none'
+        };
+        
+        console.log(`${test.description}: ${result ? '✅ Found' : '❌ Not found'} (${duration}ms)`);
+        if (result) {
+          console.log(`  Strategy: ${result.strategy}, Selector: ${result.selector}`);
+        }
+      } catch (error) {
+        results[test.type] = {
+          found: false,
+          error: error.message
+        };
+        console.log(`${test.description}: ❌ Error - ${error.message}`);
+      }
+    }
+    
+    return results;
+  },
+  
+  resetResilientFinder: () => {
+    resilientFinder.reset();
+    console.log('[LI Helper] Resilient finder cache and stats reset');
+  },
+  
+  testAdaptiveSelectors: () => {
+    console.log('[LI Helper] Testing adaptive selector learning...');
+    console.log('Current cache:', resilientFinder.selectorCache);
+    console.log('Strategy success rates:', resilientFinder.strategyStats);
+    
+    // Show which strategies are working best
+    const strategies = Object.entries(resilientFinder.strategyStats)
+      .map(([name, stats]) => ({
+        name,
+        attempts: stats.attempts,
+        successes: stats.success,
+        rate: stats.attempts > 0 ? (stats.success / stats.attempts * 100).toFixed(1) + '%' : '0%'
+      }))
+      .sort((a, b) => parseFloat(b.rate) - parseFloat(a.rate));
+    
+    console.table(strategies);
+    return strategies;
+  },
+  
+  // Operation Queue monitoring and testing
+  getQueueStats: () => {
+    const stats = operationQueue.getStats();
+    console.log('[LI Helper] Operation queue statistics:', stats);
+    return stats;
+  },
+  
+  testOperationQueue: async () => {
+    console.log('[LI Helper] Testing operation queue with sample operations...');
+    
+    const results = {};
+    
+    // Test parallel operations
+    const promises = [];
+    
+    // Add some test operations
+    promises.push(
+      operationQueue.enqueue('test_operation_1', async () => {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return 'Test 1 completed';
+      }, { priority: 5 })
+    );
+    
+    promises.push(
+      operationQueue.enqueue('test_operation_2', async () => {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        return 'Test 2 completed';
+      }, { priority: 8 })
+    );
+    
+    promises.push(
+      operationQueue.enqueue('test_operation_3', async () => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        return 'Test 3 completed';
+      }, { priority: 10 })
+    );
+    
+    try {
+      const allResults = await Promise.all(promises);
+      results.success = true;
+      results.operations = allResults;
+      results.stats = operationQueue.getStats();
+      
+      console.log('✅ All test operations completed:', allResults);
+      console.log('Queue stats after test:', results.stats);
+      
+    } catch (error) {
+      results.success = false;
+      results.error = error.message;
+      console.log('❌ Test operations failed:', error.message);
+    }
+    
+    return results;
+  },
+  
+  testOperationRetry: async () => {
+    console.log('[LI Helper] Testing operation retry logic...');
+    
+    let attemptCount = 0;
+    
+    try {
+      const result = await operationQueue.enqueue('test_retry_operation', async () => {
+        attemptCount++;
+        console.log(`Retry test attempt ${attemptCount}`);
+        
+        if (attemptCount < 3) {
+          throw new Error(`Simulated failure on attempt ${attemptCount}`);
+        }
+        
+        return `Success on attempt ${attemptCount}`;
+      }, {
+        retryable: true,
+        onRetry: (error, attempt) => {
+          console.log(`Retry callback: ${error.message}, attempt ${attempt}`);
+        }
+      });
+      
+      console.log('✅ Retry test completed:', result);
+      return { success: true, result, totalAttempts: attemptCount };
+      
+    } catch (error) {
+      console.log('❌ Retry test failed:', error.message);
+      return { success: false, error: error.message, totalAttempts: attemptCount };
+    }
+  },
+  
+  getOperationHistory: () => {
+    const history = operationQueue.operationHistory;
+    console.log(`[LI Helper] Operation history (${history.length} operations):`);
+    console.table(history.slice(-10)); // Show last 10 operations
+    return history;
+  },
+  
+  clearOperationHistory: () => {
+    operationQueue.clearHistory();
+    console.log('[LI Helper] Operation history cleared');
+  },
+  
+  cancelPendingOperations: () => {
+    operationQueue.cancelAll();
+    console.log('[LI Helper] All pending operations cancelled');
   }
 };
 
@@ -2349,7 +3361,9 @@ liHelperTemplates.add("casual",
 };
 
   console.log('[LI Helper] Global objects created successfully!');
-  console.log('🔧 Debug commands: liHelperDebug.getErrors(), liHelperDebug.clearErrors(), liHelperDebug.toggleDebug()');
+  console.log('🔧 Debug commands: liHelperDebug.getErrors(), liHelperDebug.getResourceStats(), liHelperDebug.getResilientStats(), liHelperDebug.getQueueStats()');
+  console.log('🧪 Testing commands: await liHelperDebug.testResilientFinder(), await liHelperDebug.testOperationQueue(), await liHelperDebug.testOperationRetry()');
+  console.log('⚡ Queue commands: liHelperDebug.getOperationHistory(), liHelperDebug.cancelPendingOperations(), liHelperDebug.clearOperationHistory()');
   console.log('💾 Storage commands: liHelperStorage.getConfig(), liHelperStorage.setupPersonal(), liHelperStorage.testVariables()');
   console.log('📝 Template commands: liHelperTemplates.list(), liHelperTemplates.help(), await liHelperTemplates.add()');
 }
@@ -2360,7 +3374,7 @@ setupGlobalObjects();
 console.log('LinkedIn Connection Helper is ready!');
 
 // Test global objects accessibility (CSP-safe)
-setTimeout(() => {
+const accessibilityTestTimeoutId = setTimeout(() => {
   console.log('[LI Helper] Testing global object accessibility...');
   
   const tests = {
@@ -2380,9 +3394,24 @@ setTimeout(() => {
   // If everything is available, show usage instructions
   if (tests['window.liHelperStorage'] && tests['window.liHelperDebug'] && tests['window.liHelperTemplates']) {
     console.log('\n🎉 All global objects are ready for use!');
-    console.log('📖 Try: await liHelperStorage.setupPersonal("Your Name", "Your Title", "Your Background")');
+    console.log('\n📖 Quick Start:');
+    console.log('  await liHelperStorage.setupPersonal("Your Name", "Your Title", "Your Background")');
+    console.log('\n🧪 Test Systems:');
+    console.log('  await liHelperDebug.testResilientFinder() // Test DOM detection');
+    console.log('  await liHelperDebug.testOperationQueue()  // Test operation queue');
+    console.log('  await liHelperDebug.testOperationRetry()  // Test retry logic');
+    console.log('\n📊 Monitor Performance:');
+    console.log('  liHelperDebug.getResilientStats()        // DOM finder stats');
+    console.log('  liHelperDebug.getQueueStats()            // Operation queue stats');
+    console.log('  liHelperDebug.getResourceStats()         // Memory usage');
+    console.log('\n⚡ Operation Management:');
+    console.log('  liHelperDebug.getOperationHistory()      // View operation history');
+    console.log('  liHelperDebug.cancelPendingOperations()  // Cancel pending operations');
   }
 }, 2000);
+
+// Register timeout for cleanup
+resourceManager.addTimer(accessibilityTestTimeoutId);
 
 // Message handling for popup communication
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
