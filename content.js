@@ -283,6 +283,89 @@ class LinkedInElementFinder {
     return this.findElementWithRetry(selectorGroups, { maxAttempts: 5 });
   }
 
+  // NEW: Extract additional profile data for template variables
+  async extractAdditionalProfileData() {
+    this.log('Extracting additional profile data for templates...');
+    
+    const data = {};
+    
+    // Extract headline
+    try {
+      const headlineSelectors = [
+        '.text-body-medium.break-words',
+        '.pv-text-details__left-panel .text-body-medium',
+        '.ph5.pb5 .text-body-medium',
+        '[class*="headline"]',
+        '.pv-top-card-v3__headline',
+        '.top-card-layout__headline'
+      ];
+
+      for (const selector of headlineSelectors) {
+        const element = document.querySelector(selector);
+        if (element && element.textContent?.trim()) {
+          data.headline = element.textContent.trim();
+          break;
+        }
+      }
+    } catch (error) {
+      this.log('Error extracting headline:', error.message);
+    }
+
+    // Extract university/education
+    try {
+      const educationSelectors = [
+        '.pv-profile-section__card-item-v2 .pv-entity__school-name',
+        '.education .pv-entity__school-name',
+        '.pv-education-entity__school-name',
+        '.pvs-entity__caption-wrapper',
+        '.education-section .pv-entity__school-name'
+      ];
+
+      for (const selector of educationSelectors) {
+        const element = document.querySelector(selector);
+        if (element && element.textContent?.trim()) {
+          const schoolName = element.textContent.trim();
+          if (schoolName.toLowerCase().includes('university') || 
+              schoolName.toLowerCase().includes('college') ||
+              schoolName.toLowerCase().includes('institute')) {
+            data.university = schoolName;
+            break;
+          }
+        }
+      }
+    } catch (error) {
+      this.log('Error extracting education:', error.message);
+    }
+
+    // Extract location
+    try {
+      const locationSelectors = [
+        '.pv-text-details__left-panel .text-body-small',
+        '.ph5.pb5 .text-body-small',
+        '.pv-top-card-v3__location',
+        '.top-card-layout__first-subline'
+      ];
+
+      for (const selector of locationSelectors) {
+        const element = document.querySelector(selector);
+        if (element && element.textContent?.trim()) {
+          const locationText = element.textContent.trim();
+          // Simple check to see if it looks like a location
+          if (locationText.includes(',') || locationText.includes('United States') || 
+              locationText.includes('New York') || locationText.includes('California')) {
+            data.location = locationText;
+            break;
+          }
+        }
+      }
+    } catch (error) {
+      this.log('Error extracting location:', error.message);
+    }
+
+    this.log('Additional profile data extracted:', data);
+    return data;
+  }
+
   // NEW: Extract name from profile page as fallback
   async extractNameFromProfilePage() {
     this.log('Extracting name from profile page...');
@@ -624,6 +707,566 @@ class LinkedInElementFinder {
   }
 }
 
+// Storage Management System - Handle Chrome storage operations
+class StorageManager {
+  constructor() {
+    this.storageKey = 'liHelper';
+    this.defaultConfig = this.getDefaultConfig();
+  }
+
+  // Get default configuration structure
+  getDefaultConfig() {
+    return {
+      personalInfo: {
+        name: 'Sachin',
+        title: "Master's CS student at NYU",
+        background: 'passionate about tech',
+        university: 'New York University',
+        location: 'New York, NY',
+        email: '',
+        linkedinProfile: ''
+      },
+      
+      templateSettings: {
+        defaultTemplate: 'general',
+        autoSelectTemplate: true,
+        customTemplates: {},
+        enabledTemplates: ['engineer', 'recruiter', 'student', 'general', 'sameCompany', 'sameUniversity']
+      },
+      
+      preferences: {
+        autoSend: false,
+        debugMode: true,
+        notifications: true,
+        previewBeforeSend: true,
+        showDetectedInfo: true,
+        extensionEnabled: true
+      },
+      
+      advanced: {
+        retryAttempts: 15,
+        retryDelay: 200,
+        maxErrors: 50,
+        enableErrorReporting: true
+      }
+    };
+  }
+
+  // Load configuration from storage
+  async loadConfig() {
+    try {
+      const result = await chrome.storage.sync.get([this.storageKey]);
+      const storedConfig = result[this.storageKey];
+      
+      if (storedConfig) {
+        // Merge with defaults to ensure new fields are added
+        const config = this.mergeWithDefaults(storedConfig, this.defaultConfig);
+        console.log('[LI Helper] Configuration loaded from storage:', config);
+        return config;
+      } else {
+        console.log('[LI Helper] No stored configuration found, using defaults');
+        // Save defaults on first run
+        await this.saveConfig(this.defaultConfig);
+        return this.defaultConfig;
+      }
+    } catch (error) {
+      console.error('[LI Helper] Error loading configuration:', error);
+      return this.defaultConfig;
+    }
+  }
+
+  // Save configuration to storage
+  async saveConfig(config) {
+    try {
+      await chrome.storage.sync.set({ [this.storageKey]: config });
+      console.log('[LI Helper] Configuration saved to storage');
+      return true;
+    } catch (error) {
+      console.error('[LI Helper] Error saving configuration:', error);
+      return false;
+    }
+  }
+
+  // Update specific section of configuration
+  async updateSection(section, data) {
+    try {
+      const config = await this.loadConfig();
+      config[section] = { ...config[section], ...data };
+      await this.saveConfig(config);
+      console.log(`[LI Helper] Updated ${section} configuration:`, data);
+      return config;
+    } catch (error) {
+      console.error(`[LI Helper] Error updating ${section}:`, error);
+      return null;
+    }
+  }
+
+  // Get specific section of configuration
+  async getSection(section) {
+    try {
+      const config = await this.loadConfig();
+      return config[section] || {};
+    } catch (error) {
+      console.error(`[LI Helper] Error getting ${section}:`, error);
+      return {};
+    }
+  }
+
+  // Update personal information
+  async updatePersonalInfo(personalInfo) {
+    return this.updateSection('personalInfo', personalInfo);
+  }
+
+  // Update template settings
+  async updateTemplateSettings(templateSettings) {
+    return this.updateSection('templateSettings', templateSettings);
+  }
+
+  // Update preferences
+  async updatePreferences(preferences) {
+    return this.updateSection('preferences', preferences);
+  }
+
+  // Add custom template
+  async addCustomTemplate(name, template, description = '') {
+    try {
+      const config = await this.loadConfig();
+      if (!config.templateSettings.customTemplates) {
+        config.templateSettings.customTemplates = {};
+      }
+      
+      config.templateSettings.customTemplates[name] = {
+        name: description || name,
+        template: template,
+        custom: true,
+        created: Date.now()
+      };
+      
+      await this.saveConfig(config);
+      console.log(`[LI Helper] Added custom template: ${name}`);
+      return true;
+    } catch (error) {
+      console.error('[LI Helper] Error adding custom template:', error);
+      return false;
+    }
+  }
+
+  // Remove custom template
+  async removeCustomTemplate(name) {
+    try {
+      const config = await this.loadConfig();
+      if (config.templateSettings.customTemplates && config.templateSettings.customTemplates[name]) {
+        delete config.templateSettings.customTemplates[name];
+        await this.saveConfig(config);
+        console.log(`[LI Helper] Removed custom template: ${name}`);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('[LI Helper] Error removing custom template:', error);
+      return false;
+    }
+  }
+
+  // Export configuration for backup
+  async exportConfig() {
+    try {
+      const config = await this.loadConfig();
+      const exportData = {
+        version: '2.1',
+        exportDate: new Date().toISOString(),
+        config: config
+      };
+      console.log('[LI Helper] Configuration export:', exportData);
+      return exportData;
+    } catch (error) {
+      console.error('[LI Helper] Error exporting configuration:', error);
+      return null;
+    }
+  }
+
+  // Import configuration from backup
+  async importConfig(importData) {
+    try {
+      if (!importData.config) {
+        throw new Error('Invalid import data: missing config');
+      }
+      
+      const mergedConfig = this.mergeWithDefaults(importData.config, this.defaultConfig);
+      await this.saveConfig(mergedConfig);
+      console.log('[LI Helper] Configuration imported successfully');
+      return mergedConfig;
+    } catch (error) {
+      console.error('[LI Helper] Error importing configuration:', error);
+      return null;
+    }
+  }
+
+  // Reset to default configuration
+  async resetToDefaults() {
+    try {
+      await this.saveConfig(this.defaultConfig);
+      console.log('[LI Helper] Configuration reset to defaults');
+      return this.defaultConfig;
+    } catch (error) {
+      console.error('[LI Helper] Error resetting configuration:', error);
+      return null;
+    }
+  }
+
+  // Merge stored config with defaults (for adding new fields)
+  mergeWithDefaults(stored, defaults) {
+    const merged = {};
+    
+    // Start with defaults
+    for (const [key, value] of Object.entries(defaults)) {
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        // Recursively merge objects
+        merged[key] = this.mergeWithDefaults(stored[key] || {}, value);
+      } else {
+        // Use stored value if exists, otherwise default
+        merged[key] = stored[key] !== undefined ? stored[key] : value;
+      }
+    }
+    
+    // Add any additional fields from stored config that aren't in defaults
+    for (const [key, value] of Object.entries(stored || {})) {
+      if (!(key in defaults)) {
+        merged[key] = value;
+      }
+    }
+    
+    return merged;
+  }
+
+  // Get current storage usage
+  async getStorageInfo() {
+    try {
+      const result = await chrome.storage.sync.getBytesInUse();
+      const quota = chrome.storage.sync.QUOTA_BYTES;
+      return {
+        used: result,
+        quota: quota,
+        percentage: Math.round((result / quota) * 100),
+        available: quota - result
+      };
+    } catch (error) {
+      console.error('[LI Helper] Error getting storage info:', error);
+      return null;
+    }
+  }
+}
+
+// Template Variables System - Customizable message templates
+class TemplateProcessor {
+  constructor(storageManager) {
+    this.storageManager = storageManager;
+    this.defaultTemplates = this.getDefaultTemplates();
+    this.userTemplates = {}; // Will be loaded from storage
+    this.variables = {}; // Current template variables
+    this.personalInfo = {}; // Cached personal info from storage
+    
+    // Initialize with storage data
+    this.initialize();
+  }
+
+  // Initialize with storage data
+  async initialize() {
+    try {
+      await this.loadFromStorage();
+    } catch (error) {
+      console.error('[LI Helper] Error initializing TemplateProcessor:', error);
+    }
+  }
+
+  // Load templates and personal info from storage
+  async loadFromStorage() {
+    try {
+      const config = await this.storageManager.loadConfig();
+      
+      // Load personal info for variables
+      this.personalInfo = config.personalInfo || {};
+      
+      // Load custom templates
+      this.userTemplates = config.templateSettings?.customTemplates || {};
+      
+      console.log('[LI Helper] TemplateProcessor loaded from storage');
+      console.log('Personal info:', this.personalInfo);
+      console.log('Custom templates:', Object.keys(this.userTemplates));
+      
+    } catch (error) {
+      console.error('[LI Helper] Error loading from storage:', error);
+    }
+  }
+
+  // Process template string and replace variables
+  processTemplate(template, variables = {}) {
+    this.variables = { ...this.getDefaultVariables(), ...variables };
+    
+    let processed = template;
+    
+    // Replace all {variable} placeholders
+    processed = processed.replace(/\{(\w+)\}/g, (match, variableName) => {
+      const value = this.variables[variableName];
+      
+      if (value !== undefined && value !== null && value !== '') {
+        return value;
+      }
+      
+      // Handle fallbacks for missing variables
+      return this.getFallbackValue(variableName, match);
+    });
+    
+    // Clean up any remaining empty conditionals or extra spaces
+    processed = this.cleanupTemplate(processed);
+    
+    return processed;
+  }
+
+  // Get default variable values (now pulls from storage)
+  getDefaultVariables() {
+    return {
+      // Profile variables (dynamically detected)
+      firstName: 'there',
+      fullName: 'LinkedIn User', 
+      company: 'your company',
+      role: 'your role',
+      headline: 'your background',
+      university: 'your university',
+      location: 'your area',
+      
+      // Personal variables (from storage)
+      myName: this.personalInfo.name || 'Your Name',
+      myTitle: this.personalInfo.title || 'Your Title',
+      myBackground: this.personalInfo.background || 'passionate about tech',
+      myUniversity: this.personalInfo.university || 'your university',
+      myLocation: this.personalInfo.location || 'your location',
+      myEmail: this.personalInfo.email || '',
+      myLinkedIn: this.personalInfo.linkedinProfile || ''
+    };
+  }
+
+  // Get fallback value for missing variables
+  getFallbackValue(variableName, originalMatch) {
+    const fallbacks = {
+      firstName: 'there',
+      fullName: 'LinkedIn User',
+      company: 'the company',
+      role: 'your role', 
+      headline: 'your background',
+      university: 'your university',
+      location: 'your area'
+    };
+    
+    return fallbacks[variableName] || originalMatch; // Keep original if no fallback
+  }
+
+  // Clean up template after variable replacement
+  cleanupTemplate(template) {
+    // Remove double spaces
+    template = template.replace(/\s+/g, ' ');
+    
+    // Fix punctuation issues
+    template = template.replace(/\s+([,.!?])/g, '$1');
+    
+    // Remove empty parentheses or brackets
+    template = template.replace(/\(\s*\)/g, '');
+    template = template.replace(/\[\s*\]/g, '');
+    
+    // Trim and normalize
+    return template.trim();
+  }
+
+  // Default template library
+  getDefaultTemplates() {
+    return {
+      engineer: {
+        name: "Software Engineer Template",
+        template: `Hi {firstName},
+
+I'm {myName}, a {myTitle} {myBackground}.
+
+I'd love to connect and learn about your journey as {role} at {company}. Would also appreciate any insights you might share about the interview process and work culture there.
+
+Eager to learn from experienced professionals like yourself!
+
+Best regards`
+      },
+      
+      recruiter: {
+        name: "Recruiter/Hiring Manager Template", 
+        template: `Hi {firstName},
+
+I noticed you're working as {role} at {company}. I'm actively exploring new opportunities in software development and would love to connect. I believe my skills could be a great fit for roles at {company}.
+
+Looking forward to connecting!
+
+Best regards`
+      },
+      
+      student: {
+        name: "Student/Academic Template",
+        template: `Hi {firstName},
+
+I'm {myName}, a {myTitle} {myBackground}.
+
+I'd love to connect and learn about your academic journey at {university} and any insights you might share about {role} opportunities.
+
+Eager to learn from experienced professionals like yourself!
+
+Best regards`
+      },
+      
+      general: {
+        name: "General Professional Template",
+        template: `Hi {firstName},
+
+I'm {myName}, a {myTitle} {myBackground}.
+
+I'd love to connect and learn about your journey, work culture at {company}, and any insights you might share about the industry.
+
+Eager to learn from experienced professionals like yourself!
+
+Best regards`
+      },
+      
+      sameCompany: {
+        name: "Same Company Template",
+        template: `Hi {firstName},
+
+I see you work at {company} - I'm very interested in opportunities there! I'm {myName}, a {myTitle} {myBackground}.
+
+I'd love to connect and learn about your experience at {company} and any insights about the work culture and interview process.
+
+Looking forward to connecting!
+
+Best regards`
+      },
+      
+      sameUniversity: {
+        name: "Alumni Template", 
+        template: `Hi {firstName},
+
+Fellow {university} here! I'm {myName}, a {myTitle} {myBackground}.
+
+I'd love to connect and learn about your journey from {university} to {role} at {company}. Always great to connect with fellow alumni!
+
+Best regards`
+      }
+    };
+  }
+
+  // Select appropriate template based on extracted data
+  selectTemplate(profileData) {
+    const { firstName, role, company, university, headline } = profileData;
+    
+    // Template selection logic
+    if (role && (role.toLowerCase().includes('engineer') || role.toLowerCase().includes('developer'))) {
+      return this.getTemplate('engineer');
+    }
+    
+    if (role && (role.toLowerCase().includes('recruiter') || role.toLowerCase().includes('hiring') || role.toLowerCase().includes('talent'))) {
+      return this.getTemplate('recruiter');
+    }
+    
+    if (university && (university.toLowerCase().includes('nyu') || university.toLowerCase().includes('new york university'))) {
+      return this.getTemplate('sameUniversity');
+    }
+    
+    if (company && role) {
+      return this.getTemplate('general');
+    }
+    
+    // Default fallback
+    return this.getTemplate('general');
+  }
+
+  // Get template by name
+  getTemplate(templateName) {
+    // Check user templates first, then default templates
+    return this.userTemplates[templateName] || this.defaultTemplates[templateName] || this.defaultTemplates.general;
+  }
+
+  // Allow users to add custom templates (now saves to storage)
+  async addCustomTemplate(name, template, description = '') {
+    try {
+      // Update local cache
+      this.userTemplates[name] = {
+        name: description || name,
+        template: template,
+        custom: true,
+        created: Date.now()
+      };
+      
+      // Save to storage
+      const success = await this.storageManager.addCustomTemplate(name, template, description);
+      
+      if (success) {
+        console.log(`[LI Helper] Added custom template: ${name}`);
+        return true;
+      } else {
+        // Revert local cache if storage failed
+        delete this.userTemplates[name];
+        return false;
+      }
+    } catch (error) {
+      console.error('[LI Helper] Error adding custom template:', error);
+      return false;
+    }
+  }
+
+  // Remove custom template
+  async removeCustomTemplate(name) {
+    try {
+      const success = await this.storageManager.removeCustomTemplate(name);
+      
+      if (success) {
+        // Update local cache
+        delete this.userTemplates[name];
+        console.log(`[LI Helper] Removed custom template: ${name}`);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('[LI Helper] Error removing custom template:', error);
+      return false;
+    }
+  }
+
+  // Update personal information (triggers variable refresh)
+  async updatePersonalInfo(personalInfo) {
+    try {
+      const config = await this.storageManager.updatePersonalInfo(personalInfo);
+      if (config) {
+        // Update local cache
+        this.personalInfo = config.personalInfo;
+        console.log('[LI Helper] Personal info updated:', this.personalInfo);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('[LI Helper] Error updating personal info:', error);
+      return false;
+    }
+  }
+
+  // Get all available templates
+  getAllTemplates() {
+    return {
+      ...this.defaultTemplates,
+      ...this.userTemplates
+    };
+  }
+
+  // Export templates for backup
+  exportTemplates() {
+    return {
+      default: this.defaultTemplates,
+      custom: this.userTemplates
+    };
+  }
+}
+
 // Comprehensive error handling and reporting system
 class ErrorReporter {
   constructor() {
@@ -804,8 +1447,21 @@ class ErrorReporter {
   }
 }
 
-// Initialize the element finder
+// Initialize storage manager, element finder and template processor
+const storageManager = new StorageManager();
 const elementFinder = new LinkedInElementFinder();
+const templateProcessor = new TemplateProcessor(storageManager);
+
+// Ensure global objects are available after initialization
+setTimeout(() => {
+  console.log('[LI Helper] Setting up global debug objects...');
+  if (typeof window.liHelperStorage === 'undefined') {
+    console.log('[LI Helper] liHelperStorage not found, creating it...');
+    setupGlobalObjects();
+  } else {
+    console.log('[LI Helper] Global objects already available');
+  }
+}, 1000);
 
 // Extension state
 let extensionEnabled = true;
@@ -839,7 +1495,7 @@ function waitForConnectionModal() {
   const maxAttempts = 50; // 5 seconds at 100ms intervals
   const startTime = Date.now();
   
-  const observer = new MutationObserver((mutations, obs) => {
+      const observer = new MutationObserver((mutations, obs) => {
     attempts++;
     
     // Look for modal indicators
@@ -852,7 +1508,7 @@ function waitForConnectionModal() {
     if (modalExists) {
       const actualTime = Date.now() - startTime;
       elementFinder.log(`✓ Modal detected after ${actualTime}ms`);
-      obs.disconnect();
+          obs.disconnect();
       fillConnectionMessage();
       return;
     }
@@ -1108,8 +1764,8 @@ async function insertPersonalizedMessage() {
         );
         
         // Final fallback: Ask user for name
-        const fallbackName = prompt('Could not detect name automatically. Please enter the person\'s first name:');
-        if (fallbackName && fallbackName.trim()) {
+    const fallbackName = prompt('Could not detect name automatically. Please enter the person\'s first name:');
+    if (fallbackName && fallbackName.trim()) {
           firstName = fallbackName.trim();
           nameDetectionStrategy = 'Manual Input';
           elementFinder.log(`Using manual name input: ${firstName}`);
@@ -1120,8 +1776,8 @@ async function insertPersonalizedMessage() {
             'User cancelled manual name input',
             { promptShown: true }
           );
-          return;
-        }
+      return;
+    }
       }
     }
     
@@ -1151,53 +1807,73 @@ async function insertPersonalizedMessage() {
 async function handleNameDetected(firstName, nameDetectionStrategy = 'Unknown') {
   elementFinder.log(`Processing connection for: ${firstName} (name strategy: ${nameDetectionStrategy})`);
   
-  // Use NEW intelligent role/company extraction
-  let role = '';
-  let company = '';
-  let extractionStrategy = '';
-  
   try {
-    const profileData = await elementFinder.extractProfileRoleAndCompany();
-    role = profileData.role || '';
-    company = profileData.company || '';
-    extractionStrategy = profileData.strategy || 'none';
+    // Step 1: Extract role/company data
+    const profileRoleData = await elementFinder.extractProfileRoleAndCompany();
+    const role = profileRoleData.role || '';
+    const company = profileRoleData.company || '';
+    const extractionStrategy = profileRoleData.strategy || 'none';
     
     elementFinder.log(`Profile extraction complete - Strategy: ${extractionStrategy}`);
     
+    // Step 2: Extract additional profile data for template variables
+    const additionalData = await elementFinder.extractAdditionalProfileData();
+    
+    // Step 3: Build complete profile data object for template processing
+    const profileData = {
+      firstName: firstName,
+      fullName: firstName, // We can enhance this if we have full name
+      role: role,
+      company: company,
+      headline: additionalData.headline || '',
+      university: additionalData.university || '',
+      location: additionalData.location || '',
+      // Additional computed fields
+      hasRole: !!role,
+      hasCompany: !!company,
+      hasUniversity: !!additionalData.university
+    };
+    
+    elementFinder.log('Complete profile data for templates:', profileData);
+    
+    // Step 4: Use template processor to select and generate message
+    const selectedTemplate = templateProcessor.selectTemplate(profileData);
+    const personalizedMessage = templateProcessor.processTemplate(selectedTemplate.template, profileData);
+    
+    elementFinder.log(`Selected template: ${selectedTemplate.name}`);
+    elementFinder.log('Generated message preview:', personalizedMessage.substring(0, 100) + '...');
+    
+    // Continue with message insertion
+    await insertMessageIntoTextarea(personalizedMessage, {
+      profileData,
+      selectedTemplate: selectedTemplate.name,
+      nameDetectionStrategy,
+      extractionStrategy
+    });
+    
   } catch (error) {
-    elementFinder.log('Error extracting profile data:', error);
+    elementFinder.log('Error in handleNameDetected:', error);
     elementFinder.errorReporter.logError('WARNING', 'Profile data extraction failed', {
       error: error.message,
       firstName,
       url: window.location.href
     });
+    
+    // Fallback to simple template
+    const fallbackMessage = `Hi ${firstName},\n\nI'm Sachin, a Master's CS student at NYU passionate about tech.\n\nI'd love to connect and learn about your journey and any insights you might share.\n\nEager to learn from experienced professionals like yourself!\n\nBest regards`;
+    
+    await insertMessageIntoTextarea(fallbackMessage, {
+      profileData: { firstName },
+      selectedTemplate: 'Fallback',
+      nameDetectionStrategy,
+      extractionStrategy: 'fallback'
+    });
   }
-  
-  elementFinder.log(`Detected role: ${role || 'Not found'}`);
-  elementFinder.log(`Detected company: ${company || 'Not found'}`);
-  
-  // Create personalized message templates
-  const templates = [
-    {
-      condition: () => role.toLowerCase().includes('engineer') || role.toLowerCase().includes('developer'),
-      message: `Hi ${firstName}, I'm Sachin, a Master's CS student at NYU passionate about tech.\n\nI'd love to connect and learn about your journey as ${role} at ${company}. Would also appreciate any insights you might share about the interview process and work culture there.\n\nEager to learn from experienced professionals like yourself!\n\nBest regards`
-    },
-    {
-      condition: () => role.toLowerCase().includes('recruiter') || role.toLowerCase().includes('hiring') || role.toLowerCase().includes('talent'),
-      message: `Hi ${firstName},\n\nI noticed you're working as ${role} at ${company}. I'm actively exploring new opportunities in software development and would love to connect. I believe my skills could be a great fit for roles at ${company}.\n\nLooking forward to connecting!\n\nBest regards`
-    },
-    {
-      condition: () => role && company, // Has both role and company
-      message: `Hi ${firstName}, I'm Sachin, a Master's CS student at NYU passionate about tech.\n\nI'd love to connect and learn about your journey, work culture at ${company}, and any insights you might share about the interview process.\n\nEager to learn from experienced professionals like yourself!\n\nBest regards`
-    },
-    {
-      condition: () => true, // Default template
-      message: `Hi ${firstName}, I'm Sachin, a Master's CS student at NYU passionate about tech.\n\nI'd love to connect and learn about your journey, work culture, and any insights you might share about the interview process.\n\nEager to learn from experienced professionals like yourself!\n\nBest regards`
-    }
-  ];
-  
-  // Select appropriate template
-  const selectedTemplate = templates.find(t => t.condition()).message;
+}
+
+// Separate function for message insertion to reduce complexity
+async function insertMessageIntoTextarea(message, metadata) {
+  const { profileData, selectedTemplate, nameDetectionStrategy, extractionStrategy } = metadata;
   
   // Find the message textarea using robust detection
   try {
@@ -1205,7 +1881,11 @@ async function handleNameDetected(firstName, nameDetectionStrategy = 'Unknown') 
     
     if (!messageResult) {
       elementFinder.log('✗ Could not find message textarea');
-      showNotification('⚠️ Could not find message box. Try manually clicking in the text area.', 'error');
+      elementFinder.errorReporter.showUserError(
+        '⚠️ Could not find message box.',
+        'error',
+        ['Try manually clicking in the text area', 'Refresh the page', 'Click "Add a note" manually']
+      );
       return;
     }
     
@@ -1214,7 +1894,7 @@ async function handleNameDetected(firstName, nameDetectionStrategy = 'Unknown') 
     
     // Clear existing text and insert new message
     messageBox.value = '';
-    messageBox.value = selectedTemplate;
+    messageBox.value = message;
     
     // Trigger events to ensure LinkedIn registers the change
     messageBox.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1222,7 +1902,7 @@ async function handleNameDetected(firstName, nameDetectionStrategy = 'Unknown') 
     messageBox.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
     messageBox.focus();
     
-    // Visual feedback
+    // Visual feedback with template info
     messageBox.style.border = '2px solid #0a66c2';
     messageBox.style.backgroundColor = '#f0f7ff';
     
@@ -1232,20 +1912,37 @@ async function handleNameDetected(firstName, nameDetectionStrategy = 'Unknown') 
     }, 2000);
     
     // Show success notification
-    showNotification('✓ Message inserted successfully!', 'success');
+    showNotification(`✓ Message inserted using ${selectedTemplate} template!`, 'success');
     
-    // Show what was detected
+    // Show comprehensive detection info
     showDetectedInfo({
-      name: firstName,
-      role: role || 'Not detected',
-      company: company || 'Not detected',
+      name: profileData.firstName,
+      role: profileData.role || 'Not detected',
+      company: profileData.company || 'Not detected', 
+      headline: profileData.headline || 'Not detected',
+      university: profileData.university || 'Not detected',
       nameStrategy: nameDetectionStrategy,
-      extractionStrategy: extractionStrategy
+      extractionStrategy: extractionStrategy,
+      templateUsed: selectedTemplate
     });
     
   } catch (error) {
     elementFinder.log('Error inserting message:', error);
-    showNotification('⚠️ Error inserting message into text box', 'error');
+    elementFinder.errorReporter.logModalError(
+      'message',
+      'Failed to insert message into textarea',
+      {
+        error: error.message,
+        messageLength: message.length,
+        template: selectedTemplate
+      }
+    );
+    
+    elementFinder.errorReporter.showUserError(
+      '⚠️ Error inserting message into text box.',
+      'error',
+      ['Try clicking in the text area manually', 'Refresh the page', 'Check console for details']
+    );
   }
 }
 
@@ -1307,15 +2004,35 @@ function showDetectedInfo(info) {
   const nameStrategyText = info.nameStrategy ? `${strategyEmoji[info.nameStrategy] || '🔍'} ${info.nameStrategy}` : '';
   const extractionStrategyText = info.extractionStrategy ? `${strategyEmoji[info.extractionStrategy] || '🔍'} ${info.extractionStrategy}` : '';
   
-  infoDiv.innerHTML = `
+  // Build comprehensive info display
+  let detailsHtml = `
     <strong>✓ Auto-detected:</strong><br>
     <span style="opacity: 0.9">
     Name: ${info.name} ${nameStrategyText ? `(${nameStrategyText})` : ''}<br>
     Role: ${info.role}<br>
-    Company: ${info.company}
-    ${extractionStrategyText ? `<br><em>via ${extractionStrategyText}</em>` : ''}
-    </span>
-  `;
+    Company: ${info.company}`;
+  
+  // Add additional data if available
+  if (info.headline && info.headline !== 'Not detected') {
+    detailsHtml += `<br>Headline: ${info.headline.substring(0, 30)}...`;
+  }
+  
+  if (info.university && info.university !== 'Not detected') {
+    detailsHtml += `<br>University: ${info.university}`;
+  }
+  
+  // Add template info
+  if (info.templateUsed) {
+    detailsHtml += `<br><br><strong>📝 Template:</strong> ${info.templateUsed}`;
+  }
+  
+  if (extractionStrategyText) {
+    detailsHtml += `<br><em>via ${extractionStrategyText}</em>`;
+  }
+  
+  detailsHtml += `</span>`;
+  
+  infoDiv.innerHTML = detailsHtml;
   
   document.body.appendChild(infoDiv);
   
@@ -1389,8 +2106,13 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
-// Add debug helper to console for error reporting
+// Function to setup global debug objects
+function setupGlobalObjects() {
+  console.log('[LI Helper] Creating global debug objects...');
+
+// Add debug helper and template customization to console
 window.liHelperDebug = {
+  // Error management
   getErrors: () => elementFinder.errorReporter.getErrorSummary(),
   exportErrors: () => elementFinder.errorReporter.exportErrors(),
   clearErrors: () => {
@@ -1403,12 +2125,297 @@ window.liHelperDebug = {
   }
 };
 
+// Storage management commands
+window.liHelperStorage = {
+  // View current configuration
+  getConfig: async () => {
+    const config = await storageManager.loadConfig();
+    console.log('[LI Helper] Current configuration:', config);
+    return config;
+  },
+
+  // Update personal information
+  updatePersonal: async (personalInfo) => {
+    if (!personalInfo || typeof personalInfo !== 'object') {
+      console.log('[LI Helper] Usage: liHelperStorage.updatePersonal({name: "Your Name", title: "Your Title", background: "Your Background"})');
+      return false;
+    }
+    
+    const success = await templateProcessor.updatePersonalInfo(personalInfo);
+    if (success) {
+      console.log('[LI Helper] ✓ Personal information updated');
+      console.log('New variables available:', templateProcessor.getDefaultVariables());
+    }
+    return success;
+  },
+
+  // Quick personal info setup
+  setupPersonal: async (name, title, background) => {
+    if (!name || !title || !background) {
+      console.log('[LI Helper] Usage: liHelperStorage.setupPersonal("Your Name", "Your Title", "Your Background")');
+      console.log('Example: liHelperStorage.setupPersonal("John Smith", "Software Engineer", "passionate about AI")');
+      return false;
+    }
+    
+    return await liHelperStorage.updatePersonal({
+      name: name,
+      title: title,
+      background: background
+    });
+  },
+
+  // Get storage info
+  getStorageInfo: async () => {
+    const info = await storageManager.getStorageInfo();
+    if (info) {
+      console.log(`[LI Helper] Storage Usage: ${info.used} bytes (${info.percentage}% of ${info.quota} bytes)`);
+      console.log(`Available: ${info.available} bytes`);
+    }
+    return info;
+  },
+
+  // Export configuration
+  export: async () => {
+    const exported = await storageManager.exportConfig();
+    if (exported) {
+      console.log('[LI Helper] Configuration export (copy this for backup):');
+      console.log(JSON.stringify(exported, null, 2));
+    }
+    return exported;
+  },
+
+  // Import configuration
+  import: async (importData) => {
+    if (!importData) {
+      console.log('[LI Helper] Usage: liHelperStorage.import(exportedData)');
+      return false;
+    }
+    
+    const config = await storageManager.importConfig(importData);
+    if (config) {
+      // Reload template processor with new data
+      await templateProcessor.loadFromStorage();
+      console.log('[LI Helper] ✓ Configuration imported and reloaded');
+    }
+    return config;
+  },
+
+  // Reset to defaults
+  reset: async () => {
+    const confirmed = confirm('Are you sure you want to reset all settings to defaults? This cannot be undone.');
+    if (confirmed) {
+      const config = await storageManager.resetToDefaults();
+      if (config) {
+        await templateProcessor.loadFromStorage();
+        console.log('[LI Helper] ✓ Configuration reset to defaults');
+      }
+      return config;
+    }
+    return false;
+  },
+
+  // Test template variables
+  testVariables: () => {
+    const variables = templateProcessor.getDefaultVariables();
+    console.log('[LI Helper] Current template variables:');
+    console.table(variables);
+    return variables;
+  }
+};
+
+// Template customization commands
+window.liHelperTemplates = {
+  // View available templates
+  list: () => {
+    const templates = templateProcessor.getAllTemplates();
+    console.log('[LI Helper] Available templates:');
+    Object.entries(templates).forEach(([key, template]) => {
+      console.log(`\n📝 ${key}: ${template.name}`);
+      console.log(`   ${template.custom ? '(Custom)' : '(Default)'}`);
+      console.log(`   Preview: ${template.template.substring(0, 80)}...`);
+    });
+    return templates;
+  },
+
+  // View specific template
+  view: (templateName) => {
+    const template = templateProcessor.getTemplate(templateName);
+    if (template) {
+      console.log(`[LI Helper] Template: ${template.name}`);
+      console.log(template.template);
+      return template;
+    } else {
+      console.log(`[LI Helper] Template "${templateName}" not found`);
+      return null;
+    }
+  },
+
+  // Add custom template (now async)
+  add: async (name, templateText, description) => {
+    if (!name || !templateText) {
+      console.log('[LI Helper] Usage: await liHelperTemplates.add("templateName", "template text", "description")');
+      console.log('Available variables: {firstName}, {company}, {role}, {headline}, {university}, {myName}, {myTitle}, {myBackground}');
+      return false;
+    }
+    
+    const success = await templateProcessor.addCustomTemplate(name, templateText, description);
+    if (success) {
+      console.log(`[LI Helper] ✓ Added custom template: ${name}`);
+    } else {
+      console.log(`[LI Helper] ✗ Failed to add template: ${name}`);
+    }
+    return success;
+  },
+
+  // Remove custom template
+  remove: async (name) => {
+    if (!name) {
+      console.log('[LI Helper] Usage: await liHelperTemplates.remove("templateName")');
+      return false;
+    }
+    
+    const success = await templateProcessor.removeCustomTemplate(name);
+    if (success) {
+      console.log(`[LI Helper] ✓ Removed custom template: ${name}`);
+    } else {
+      console.log(`[LI Helper] ✗ Failed to remove template: ${name} (might not exist)`);
+    }
+    return success;
+  },
+
+  // Test template processing
+  test: (templateName, testData = {}) => {
+    const template = templateProcessor.getTemplate(templateName);
+    if (!template) {
+      console.log(`[LI Helper] Template "${templateName}" not found`);
+      return null;
+    }
+
+    const sampleData = {
+      firstName: 'John',
+      company: 'TechCorp',
+      role: 'Software Engineer',
+      headline: 'Passionate developer at TechCorp',
+      university: 'MIT',
+      ...testData
+    };
+
+    const result = templateProcessor.processTemplate(template.template, sampleData);
+    console.log('[LI Helper] Template test result:');
+    console.log('─'.repeat(50));
+    console.log(result);
+    console.log('─'.repeat(50));
+    return result;
+  },
+
+  // Export templates for backup
+  export: () => {
+    const exported = templateProcessor.exportTemplates();
+    console.log('[LI Helper] Template export (copy this for backup):');
+    console.log(JSON.stringify(exported, null, 2));
+    return exported;
+  },
+
+  // Show template variables help
+  help: () => {
+    console.log(`
+[LI Helper] Template System Help
+
+📝 AVAILABLE VARIABLES:
+{firstName}    - First name (e.g., "John")
+{fullName}     - Full name (e.g., "John Smith")  
+{company}      - Company name (e.g., "Google")
+{role}         - Job title (e.g., "Software Engineer")
+{headline}     - LinkedIn headline 
+{university}   - University name (e.g., "MIT")
+{location}     - Location (e.g., "San Francisco, CA")
+{myName}       - Your name (customizable)
+{myTitle}      - Your title (customizable)
+{myBackground} - Your background (customizable)
+
+🔧 COMMANDS:
+liHelperTemplates.list()                    - Show all templates
+liHelperTemplates.view("engineer")          - View specific template
+liHelperTemplates.add("myTemplate", "Hi {firstName}...")  - Add custom template
+liHelperTemplates.test("engineer")          - Test template with sample data
+liHelperTemplates.export()                 - Export all templates
+
+📖 EXAMPLE:
+liHelperTemplates.add("casual", 
+  "Hey {firstName}! I'm {myName}, would love to connect and chat about {company}!"
+);
+    `);
+  }
+};
+
+  console.log('[LI Helper] Global objects created successfully!');
+  console.log('🔧 Debug commands: liHelperDebug.getErrors(), liHelperDebug.clearErrors(), liHelperDebug.toggleDebug()');
+  console.log('💾 Storage commands: liHelperStorage.getConfig(), liHelperStorage.setupPersonal(), liHelperStorage.testVariables()');
+  console.log('📝 Template commands: liHelperTemplates.list(), liHelperTemplates.help(), await liHelperTemplates.add()');
+}
+
+// Initialize global objects immediately
+setupGlobalObjects();
+
 console.log('LinkedIn Connection Helper is ready!');
-console.log('Debug commands available: liHelperDebug.getErrors(), liHelperDebug.exportErrors(), liHelperDebug.clearErrors(), liHelperDebug.toggleDebug()');
+
+// Test global objects accessibility (CSP-safe)
+setTimeout(() => {
+  console.log('[LI Helper] Testing global object accessibility...');
+  
+  const tests = {
+    'window.liHelperStorage': window.liHelperStorage,
+    'window.liHelperDebug': window.liHelperDebug,
+    'window.liHelperTemplates': window.liHelperTemplates
+  };
+  
+  Object.entries(tests).forEach(([name, obj]) => {
+    if (obj && typeof obj === 'object') {
+      console.log(`✅ ${name}: Available`);
+    } else {
+      console.error(`❌ ${name}: Not available`);
+    }
+  });
+  
+  // If everything is available, show usage instructions
+  if (tests['window.liHelperStorage'] && tests['window.liHelperDebug'] && tests['window.liHelperTemplates']) {
+    console.log('\n🎉 All global objects are ready for use!');
+    console.log('📖 Try: await liHelperStorage.setupPersonal("Your Name", "Your Title", "Your Background")');
+  }
+}, 2000);
+
+// Message handling for popup communication
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log('[LI Helper] Message received:', message);
+  
+  if (message.action === 'reloadConfig') {
+    console.log('[LI Helper] Reloading configuration from popup...');
+    
+    // Reload template processor with new config
+    templateProcessor.loadFromStorage().then(() => {
+      console.log('[LI Helper] Configuration reloaded successfully');
+      sendResponse({ success: true });
+    }).catch(error => {
+      console.error('[LI Helper] Error reloading configuration:', error);
+      sendResponse({ success: false, error: error.message });
+    });
+    
+    return true; // Keep message channel open for async response
+  }
+  
+  if (message.action === 'getStatus') {
+    sendResponse({
+      success: true,
+      extensionEnabled: extensionEnabled,
+      config: templateProcessor.personalInfo
+    });
+  }
+});
 
 // Log session start
 elementFinder.errorReporter.logError('INFO', 'Extension loaded successfully', {
   url: window.location.href,
   timestamp: Date.now(),
-  version: '2.0'
+  version: '2.1 - Template System with Popup UI',
+  availableTemplates: Object.keys(templateProcessor.defaultTemplates)
 });
