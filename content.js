@@ -1,7 +1,17 @@
-// LinkedIn Connection Helper - Content Script
-console.log('LinkedIn Connection Helper loaded!');
+console.log('LinkedIn Connection Helper v3.1 loading...');
 
-// Resource Management System - Prevents memory leaks
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * MODULE 1: CORE INFRASTRUCTURE
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 
+ * Foundation classes that provide memory management, operation coordination,
+ * and error handling infrastructure for the entire extension.
+ */
+
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │ 1.1 ResourceManager - Memory Leak Prevention System                        │
+// └─────────────────────────────────────────────────────────────────────────────┘
 class ResourceManager {
   constructor() {
     this.listeners = new Set();
@@ -72,7 +82,9 @@ class ResourceManager {
   }
 }
 
-// Resilient DOM Element Finding System - Adapts to LinkedIn UI changes
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │ 1.2 ResilientElementFinder - Adaptive DOM Detection System                 │
+// └─────────────────────────────────────────────────────────────────────────────┘
 class ResilientElementFinder {
   constructor(resourceManager) {
     this.resourceManager = resourceManager;
@@ -443,7 +455,9 @@ class ResilientElementFinder {
   }
 }
 
-// Operation Queue System - Prevents race conditions and manages async operations
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │ 1.3 OperationQueue - Race Condition Prevention System                     │
+// └─────────────────────────────────────────────────────────────────────────────┘
 class OperationQueue {
   constructor(resourceManager) {
     this.resourceManager = resourceManager;
@@ -777,7 +791,446 @@ class OperationQueue {
   }
 }
 
-// Enhanced reliability system with comprehensive error handling
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │ 1.4 ErrorBoundary - Circuit Breaker & Fallback System                     │
+// └─────────────────────────────────────────────────────────────────────────────┘
+class ErrorBoundary {
+  constructor(errorReporter, resourceManager) {
+    this.errorReporter = errorReporter;
+    this.resourceManager = resourceManager;
+    this.circuitBreakers = new Map();
+    this.fallbackStrategies = new Map();
+    this.recoveryStrategies = new Map();
+    this.debug = true;
+    
+    // Global error boundary configuration
+    this.config = {
+      circuitBreaker: {
+        failureThreshold: 3,      // Open circuit after 3 failures
+        timeout: 30000,           // 30 second timeout in OPEN state
+        monitoringPeriod: 60000,  // 1 minute monitoring window
+        successThreshold: 2       // Close circuit after 2 successes in HALF_OPEN
+      },
+      retry: {
+        maxRetries: 3,
+        baseDelay: 1000,
+        maxDelay: 10000,
+        backoffMultiplier: 2
+      },
+      degradation: {
+        enableGracefulDegradation: true,
+        fallbackTimeout: 5000,
+        userNotificationDelay: 2000
+      }
+    };
+    
+    // Circuit breaker states
+    this.CIRCUIT_STATES = {
+      CLOSED: 'CLOSED',     // Normal operation
+      OPEN: 'OPEN',         // Prevent calls, return fallback
+      HALF_OPEN: 'HALF_OPEN' // Test if service recovered
+    };
+  }
+
+  log(message, data = null) {
+    if (this.debug) {
+      console.log(`[Error Boundary] ${message}`, data || '');
+    }
+  }
+
+  // Main error boundary wrapper - protects any async operation
+  async protect(operationName, operation, options = {}) {
+    const {
+      fallbackStrategy = null,
+      recoveryStrategy = null,
+      enableCircuitBreaker = true,
+      enableRetry = true,
+      enableGracefulDegradation = true,
+      userFriendlyName = operationName,
+      criticalOperation = false,
+      timeout = 10000,
+      metadata = {}
+    } = options;
+
+    // Register strategies if provided
+    if (fallbackStrategy) {
+      this.fallbackStrategies.set(operationName, fallbackStrategy);
+    }
+    if (recoveryStrategy) {
+      this.recoveryStrategies.set(operationName, recoveryStrategy);
+    }
+
+    // Check circuit breaker state
+    if (enableCircuitBreaker && this.isCircuitOpen(operationName)) {
+      this.log(`Circuit breaker OPEN for ${operationName}, using fallback`);
+      return this.executeFallback(operationName, new Error('Circuit breaker open'), metadata);
+    }
+
+    try {
+      // Create timeout wrapper
+      const result = await this.executeWithTimeout(operation, timeout, operationName);
+      
+      // Success - record for circuit breaker
+      if (enableCircuitBreaker) {
+        this.recordSuccess(operationName);
+      }
+      
+      this.log(`✓ Operation ${operationName} completed successfully`);
+      return result;
+      
+    } catch (error) {
+      this.log(`✗ Operation ${operationName} failed:`, error.message);
+      
+      // Record failure for circuit breaker
+      if (enableCircuitBreaker) {
+        this.recordFailure(operationName, error);
+      }
+      
+      // Try retry logic if enabled
+      if (enableRetry) {
+        try {
+          const retryResult = await this.executeWithRetry(operationName, operation, error, timeout);
+          this.log(`✓ Operation ${operationName} succeeded on retry`);
+          return retryResult;
+        } catch (retryError) {
+          error = retryError; // Use the latest error
+        }
+      }
+      
+      // Execute recovery strategy if available
+      if (this.recoveryStrategies.has(operationName)) {
+        try {
+          await this.executeRecovery(operationName, error, metadata);
+        } catch (recoveryError) {
+          this.log(`Recovery strategy failed for ${operationName}:`, recoveryError.message);
+        }
+      }
+      
+      // Use fallback if graceful degradation is enabled
+      if (enableGracefulDegradation) {
+        return this.executeFallback(operationName, error, metadata);
+      }
+      
+      // If this is a critical operation, escalate the error
+      if (criticalOperation) {
+        this.escalateCriticalError(operationName, error, userFriendlyName);
+      }
+      
+      // Re-throw if no fallback available
+      throw error;
+    }
+  }
+
+  // Execute operation with timeout
+  async executeWithTimeout(operation, timeout, operationName) {
+    return new Promise(async (resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error(`Operation ${operationName} timed out after ${timeout}ms`));
+      }, timeout);
+      
+      // Register timeout for cleanup
+      this.resourceManager.addTimer(timeoutId);
+      
+      try {
+        const result = await operation();
+        clearTimeout(timeoutId);
+        resolve(result);
+      } catch (error) {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    });
+  }
+
+  // Execute operation with retry logic
+  async executeWithRetry(operationName, operation, lastError, timeout) {
+    const retryConfig = this.config.retry;
+    
+    for (let attempt = 1; attempt <= retryConfig.maxRetries; attempt++) {
+      const delay = Math.min(
+        retryConfig.baseDelay * Math.pow(retryConfig.backoffMultiplier, attempt - 1),
+        retryConfig.maxDelay
+      );
+      
+      this.log(`Retrying ${operationName}, attempt ${attempt}/${retryConfig.maxRetries} after ${delay}ms`);
+      
+      // Wait before retry
+      await new Promise(resolve => {
+        const retryTimeoutId = setTimeout(resolve, delay);
+        this.resourceManager.addTimer(retryTimeoutId);
+      });
+      
+      try {
+        return await this.executeWithTimeout(operation, timeout, operationName);
+      } catch (error) {
+        lastError = error;
+        this.log(`Retry ${attempt} failed for ${operationName}:`, error.message);
+        
+        // If this was the last attempt, record the failure
+        if (attempt === retryConfig.maxRetries) {
+          this.errorReporter.logError('RETRY_EXHAUSTED', 
+            `All retries exhausted for ${operationName}`, {
+              attempts: attempt,
+              lastError: error.message,
+              operationName
+            });
+        }
+      }
+    }
+    
+    throw lastError;
+  }
+
+  // Execute fallback strategy
+  async executeFallback(operationName, error, metadata = {}) {
+    if (!this.fallbackStrategies.has(operationName)) {
+      this.log(`No fallback strategy for ${operationName}, showing user error`);
+      
+      // Default user notification
+      const userMessage = this.generateUserFriendlyError(operationName, error);
+      this.showDegradedServiceNotification(userMessage.message, userMessage.suggestions);
+      
+      return null;
+    }
+    
+    try {
+      this.log(`Executing fallback strategy for ${operationName}`);
+      const fallbackFn = this.fallbackStrategies.get(operationName);
+      const result = await fallbackFn(error, metadata);
+      
+      this.log(`✓ Fallback strategy succeeded for ${operationName}`);
+      return result;
+      
+    } catch (fallbackError) {
+      this.log(`✗ Fallback strategy failed for ${operationName}:`, fallbackError.message);
+      
+      // Final fallback - show user error
+      const userMessage = this.generateUserFriendlyError(operationName, error);
+      this.showDegradedServiceNotification(userMessage.message, userMessage.suggestions);
+      
+      return null;
+    }
+  }
+
+  // Execute recovery strategy
+  async executeRecovery(operationName, error, metadata = {}) {
+    const recoveryFn = this.recoveryStrategies.get(operationName);
+    this.log(`Executing recovery strategy for ${operationName}`);
+    
+    try {
+      await recoveryFn(error, metadata);
+      this.log(`✓ Recovery strategy completed for ${operationName}`);
+    } catch (recoveryError) {
+      this.log(`✗ Recovery strategy failed for ${operationName}:`, recoveryError.message);
+      throw recoveryError;
+    }
+  }
+
+  // Circuit breaker management
+  isCircuitOpen(operationName) {
+    const breaker = this.circuitBreakers.get(operationName);
+    if (!breaker) return false;
+    
+    const now = Date.now();
+    
+    // If circuit is OPEN, check if timeout has passed
+    if (breaker.state === this.CIRCUIT_STATES.OPEN) {
+      if (now - breaker.lastFailureTime > this.config.circuitBreaker.timeout) {
+        // Move to HALF_OPEN state
+        breaker.state = this.CIRCUIT_STATES.HALF_OPEN;
+        breaker.consecutiveSuccesses = 0;
+        this.log(`Circuit breaker for ${operationName} moved to HALF_OPEN state`);
+        return false;
+      }
+      return true;
+    }
+    
+    return false;
+  }
+
+  recordSuccess(operationName) {
+    let breaker = this.circuitBreakers.get(operationName);
+    if (!breaker) {
+      breaker = this.createCircuitBreaker(operationName);
+    }
+    
+    breaker.consecutiveFailures = 0;
+    breaker.lastSuccessTime = Date.now();
+    
+    // If in HALF_OPEN state, count consecutive successes
+    if (breaker.state === this.CIRCUIT_STATES.HALF_OPEN) {
+      breaker.consecutiveSuccesses++;
+      
+      if (breaker.consecutiveSuccesses >= this.config.circuitBreaker.successThreshold) {
+        // Close the circuit
+        breaker.state = this.CIRCUIT_STATES.CLOSED;
+        this.log(`Circuit breaker for ${operationName} CLOSED after successful recovery`);
+      }
+    }
+    
+    this.circuitBreakers.set(operationName, breaker);
+  }
+
+  recordFailure(operationName, error) {
+    let breaker = this.circuitBreakers.get(operationName);
+    if (!breaker) {
+      breaker = this.createCircuitBreaker(operationName);
+    }
+    
+    breaker.consecutiveFailures++;
+    breaker.lastFailureTime = Date.now();
+    breaker.lastError = error.message;
+    
+    // Check if we should open the circuit
+    if (breaker.consecutiveFailures >= this.config.circuitBreaker.failureThreshold) {
+      breaker.state = this.CIRCUIT_STATES.OPEN;
+      this.log(`Circuit breaker for ${operationName} OPENED after ${breaker.consecutiveFailures} failures`);
+    }
+    
+    this.circuitBreakers.set(operationName, breaker);
+  }
+
+  createCircuitBreaker(operationName) {
+    return {
+      operationName,
+      state: this.CIRCUIT_STATES.CLOSED,
+      consecutiveFailures: 0,
+      consecutiveSuccesses: 0,
+      lastFailureTime: null,
+      lastSuccessTime: null,
+      lastError: null,
+      createdAt: Date.now()
+    };
+  }
+
+  // User-friendly error handling
+  generateUserFriendlyError(operationName, error) {
+    const errorMappings = {
+      'connect_button_click': {
+        message: '⚠️ Unable to process Connect button. LinkedIn may have updated their interface.',
+        suggestions: ['Try refreshing the page', 'Click the Connect button manually', 'Check if you\'re logged into LinkedIn']
+      },
+      'modal_detection': {
+        message: '⚠️ Connection dialog not found. The page may still be loading.',
+        suggestions: ['Wait a moment and try again', 'Refresh the page', 'Check your internet connection']
+      },
+      'textarea_detection': {
+        message: '⚠️ Message box not found after clicking "Add a note".',
+        suggestions: ['Click "Add a note" manually', 'Wait for the dialog to load completely', 'Try a different LinkedIn profile']
+      },
+      'message_insertion': {
+        message: '⚠️ Unable to insert message. You can type manually.',
+        suggestions: ['Type your message manually', 'Check if the message box is active', 'Try clicking in the message area first']
+      },
+      'name_detection': {
+        message: '⚠️ Could not detect the person\'s name automatically.',
+        suggestions: ['Enter the name manually when prompted', 'Check if the profile page is fully loaded', 'Try refreshing the profile']
+      }
+    };
+    
+    return errorMappings[operationName] || {
+      message: `⚠️ Operation failed: ${operationName}. Extension will continue working.`,
+      suggestions: ['Try refreshing the page', 'Check browser console for details', 'Report this issue if it persists']
+    };
+  }
+
+  showDegradedServiceNotification(message, suggestions = []) {
+    // Show immediate notification
+    this.errorReporter.showUserError(message, 'warning', suggestions);
+    
+    // Log degraded service state
+    this.errorReporter.logError('DEGRADED_SERVICE', 
+      'Extension operating in degraded mode', {
+        userMessage: message,
+        suggestions,
+        timestamp: Date.now()
+      });
+  }
+
+  escalateCriticalError(operationName, error, userFriendlyName) {
+    this.log(`🚨 CRITICAL ERROR in ${operationName}:`, error.message);
+    
+    // Log critical error
+    this.errorReporter.logError('CRITICAL', 
+      `Critical operation ${operationName} failed`, {
+        operationName,
+        userFriendlyName,
+        error: error.message,
+        stack: error.stack,
+        timestamp: Date.now(),
+        url: window.location.href
+      });
+    
+    // Show critical error notification
+    this.errorReporter.showUserError(
+      `🚨 Critical error in ${userFriendlyName}. Extension may need to reload.`,
+      'error',
+      ['Refresh the page', 'Reload the extension', 'Check browser console for details']
+    );
+  }
+
+  // Get circuit breaker statistics
+  getCircuitBreakerStats() {
+    const stats = {};
+    
+    this.circuitBreakers.forEach((breaker, operationName) => {
+      stats[operationName] = {
+        state: breaker.state,
+        consecutiveFailures: breaker.consecutiveFailures,
+        consecutiveSuccesses: breaker.consecutiveSuccesses,
+        lastFailureTime: breaker.lastFailureTime,
+        lastSuccessTime: breaker.lastSuccessTime,
+        lastError: breaker.lastError,
+        uptime: this.calculateUptime(breaker)
+      };
+    });
+    
+    return stats;
+  }
+
+  calculateUptime(breaker) {
+    const now = Date.now();
+    const totalTime = now - breaker.createdAt;
+    
+    if (totalTime === 0) return 100;
+    
+    // Estimate downtime based on circuit open states
+    let downtime = 0;
+    if (breaker.state === this.CIRCUIT_STATES.OPEN && breaker.lastFailureTime) {
+      downtime = now - breaker.lastFailureTime;
+    }
+    
+    return Math.max(0, ((totalTime - downtime) / totalTime * 100)).toFixed(2);
+  }
+
+  // Reset circuit breaker for specific operation
+  resetCircuitBreaker(operationName) {
+    if (this.circuitBreakers.has(operationName)) {
+      this.circuitBreakers.delete(operationName);
+      this.log(`Circuit breaker reset for ${operationName}`);
+    }
+  }
+
+  // Reset all circuit breakers
+  resetAllCircuitBreakers() {
+    const count = this.circuitBreakers.size;
+    this.circuitBreakers.clear();
+    this.log(`All ${count} circuit breakers reset`);
+  }
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * MODULE 2: DOM LAYER
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 
+ * LinkedIn-specific DOM interaction classes that handle element detection,
+ * data extraction, and UI manipulation with resilience against page changes.
+ */
+
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │ 2.1 LinkedInElementFinder - LinkedIn-Specific DOM Operations               │
+// └─────────────────────────────────────────────────────────────────────────────┘
 class LinkedInElementFinder {
   constructor(resourceManager = null) {
     this.debug = true;
@@ -1416,7 +1869,18 @@ class LinkedInElementFinder {
   }
 }
 
-// Storage Management System - Handle Chrome storage operations
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * MODULE 3: DATA LAYER
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 
+ * Data management classes that handle configuration storage, template processing,
+ * and data persistence with validation and fallback strategies.
+ */
+
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │ 3.1 StorageManager - Configuration & Data Persistence                      │
+// └─────────────────────────────────────────────────────────────────────────────┘
 class StorageManager {
   constructor() {
     this.storageKey = 'liHelper';
@@ -1666,7 +2130,9 @@ class StorageManager {
   }
 }
 
-// Template Variables System - Customizable message templates
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │ 3.2 TemplateProcessor - Message Template Engine                            │
+// └─────────────────────────────────────────────────────────────────────────────┘
 class TemplateProcessor {
   constructor(storageManager) {
     this.storageManager = storageManager;
@@ -1976,7 +2442,18 @@ Best regards`
   }
 }
 
-// Comprehensive error handling and reporting system
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * MODULE 4: UTILITIES
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 
+ * Utility classes that provide logging, diagnostics, debugging, and development 
+ * tools to support the extension's operation and maintenance.
+ */
+
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │ 4.1 ErrorReporter - Logging & Diagnostics System                          │
+// └─────────────────────────────────────────────────────────────────────────────┘
 class ErrorReporter {
   constructor() {
     this.errors = [];
@@ -2156,6 +2633,19 @@ class ErrorReporter {
   }
 }
 
+/*
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * MODULE 5: APPLICATION LAYER
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * 
+ * Main application logic including initialization, event handling, business logic,
+ * and the coordination of all system components.
+ */
+
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │ 5.1 System Initialization - Component Setup & Configuration               │
+// └─────────────────────────────────────────────────────────────────────────────┘
+
 // Initialize resource manager first to handle cleanup
 const resourceManager = new ResourceManager();
 
@@ -2170,6 +2660,163 @@ const storageManager = new StorageManager();
 const elementFinder = new LinkedInElementFinder(resourceManager);
 const templateProcessor = new TemplateProcessor(storageManager);
 
+// Initialize error boundary with fallback strategies
+const errorBoundary = new ErrorBoundary(elementFinder.errorReporter, resourceManager);
+
+// Register fallback strategies for critical operations
+errorBoundary.fallbackStrategies.set('connect_button_click', async (error, metadata) => {
+  // Fallback: Show manual instruction
+  elementFinder.errorReporter.showUserError(
+    '⚠️ Automatic processing failed. Please click "Connect" and "Add a note" manually.',
+    'warning',
+    ['Click the Connect button', 'Click "Add a note" button', 'The extension will detect the message box']
+  );
+  return { fallbackUsed: true, requiresManualAction: true };
+});
+
+errorBoundary.fallbackStrategies.set('modal_detection', async (error, metadata) => {
+  // Fallback: Try alternative modal selectors
+  const alternativeSelectors = [
+    '.send-invite-modal',
+    '[data-test-modal]',
+    '.invite-connect-modal',
+    '.artdeco-modal-overlay',
+    '[role="dialog"][aria-label*="Connect"]'
+  ];
+  
+  for (const selector of alternativeSelectors) {
+    const modal = document.querySelector(selector);
+    if (modal) {
+      elementFinder.log(`✓ Found modal using fallback selector: ${selector}`);
+      return { element: modal, strategy: 'fallback_selector', selector };
+    }
+  }
+  
+  // Final fallback: Ask user to manually trigger
+  elementFinder.errorReporter.showUserError(
+    '⚠️ Connection dialog not detected. Please click "Add a note" manually.',
+    'warning',
+    ['Click "Add a note" in the connection dialog', 'Wait for the dialog to fully load', 'Try refreshing if needed']
+  );
+  return { fallbackUsed: true, requiresManualAction: true };
+});
+
+errorBoundary.fallbackStrategies.set('textarea_detection', async (error, metadata) => {
+  // Fallback: Try alternative textarea selectors
+  const alternativeSelectors = [
+    'textarea[placeholder*="message"]',
+    'textarea[placeholder*="note"]',
+    '.connect-message-textarea',
+    '.invite-textarea',
+    '[contenteditable="true"]',
+    'div[role="textbox"]'
+  ];
+  
+  for (const selector of alternativeSelectors) {
+    const textarea = document.querySelector(selector);
+    if (textarea && textarea.offsetParent !== null) {
+      elementFinder.log(`✓ Found textarea using fallback selector: ${selector}`);
+      return { element: textarea, strategy: 'fallback_selector', selector };
+    }
+  }
+  
+  // Final fallback: Manual instruction
+  elementFinder.errorReporter.showUserError(
+    '⚠️ Message box not found. You can type your message manually.',
+    'warning',
+    ['Look for the message text area in the dialog', 'Click in the text area if visible', 'Type your personalized message']
+  );
+  return { fallbackUsed: true, requiresManualAction: true };
+});
+
+errorBoundary.fallbackStrategies.set('message_insertion', async (error, metadata) => {
+  // Fallback: Try clipboard approach or show message to copy
+  const { message, metadata: msgMetadata } = metadata;
+  
+  if (message) {
+    try {
+      // Try to copy message to clipboard for manual pasting
+      await navigator.clipboard.writeText(message);
+      elementFinder.errorReporter.showUserError(
+        '✅ Message copied to clipboard! Paste it manually in the text area.',
+        'info',
+        ['Press Ctrl+V (or Cmd+V) to paste', 'Click in the message area first', 'The message is ready in your clipboard']
+      );
+      return { fallbackUsed: true, messageInClipboard: true, message };
+    } catch (clipboardError) {
+      // Show message to copy manually
+      const messageDisplay = message.length > 100 ? message.substring(0, 100) + '...' : message;
+      elementFinder.errorReporter.showUserError(
+        `📝 Please copy this message manually:\n\n"${messageDisplay}"`,
+        'info',
+        ['Select and copy the message above', 'Paste it in the LinkedIn message box', 'Customize as needed']
+      );
+      return { fallbackUsed: true, manualCopyRequired: true, message };
+    }
+  }
+  
+  return { fallbackUsed: true, noMessage: true };
+});
+
+errorBoundary.fallbackStrategies.set('name_detection', async (error, metadata) => {
+  // Fallback: Try alternative name detection methods
+  const fallbackMethods = [
+    () => document.querySelector('h1')?.textContent?.trim(),
+    () => document.querySelector('.pv-text-details__left-panel h1')?.textContent?.trim(),
+    () => document.querySelector('[data-field="headline"]')?.textContent?.trim(),
+    () => document.title?.split(' | ')?.[0]?.trim(),
+    () => {
+      const ogTitle = document.querySelector('meta[property="og:title"]');
+      return ogTitle?.getAttribute('content')?.split(' | ')?.[0]?.trim();
+    }
+  ];
+  
+  for (const method of fallbackMethods) {
+    try {
+      const name = method();
+      if (name && name.length > 2 && name.length < 100) {
+        elementFinder.log(`✓ Found name using fallback method: ${name}`);
+        return { name, strategy: 'fallback_detection' };
+      }
+    } catch (methodError) {
+      continue;
+    }
+  }
+  
+  // Final fallback: Ask user for name
+  elementFinder.errorReporter.showUserError(
+    '⚠️ Could not detect name automatically. Please enter it when prompted.',
+    'warning',
+    ['You will be asked to enter the name', 'Check the profile page is fully loaded', 'Look for the person\'s name in the page title']
+  );
+  return { fallbackUsed: true, requiresUserInput: true };
+});
+
+// Register recovery strategies for cleanup and state reset
+errorBoundary.recoveryStrategies.set('connect_button_click', async (error, metadata) => {
+  // Recovery: Reset any stuck states
+  elementFinder.log('Recovery: Resetting connection flow state');
+  operationQueue.cancelAll();
+});
+
+errorBoundary.recoveryStrategies.set('modal_detection', async (error, metadata) => {
+  // Recovery: Clear any observers and reset modal detection
+  elementFinder.log('Recovery: Clearing modal detection observers');
+  // The ResourceManager will handle observer cleanup automatically
+});
+
+errorBoundary.recoveryStrategies.set('textarea_detection', async (error, metadata) => {
+  // Recovery: Reset textarea detection state
+  elementFinder.log('Recovery: Resetting textarea detection state');
+  // Clear any cached textarea references that might be stale
+});
+
+errorBoundary.recoveryStrategies.set('message_insertion', async (error, metadata) => {
+  // Recovery: Clear any stuck message states
+  elementFinder.log('Recovery: Clearing message insertion state');
+  // Any cleanup needed for message insertion failures
+});
+
 // Ensure global objects are available after initialization
 const globalSetupTimeoutId = setTimeout(() => {
   console.log('[LI Helper] Setting up global debug objects...');
@@ -2183,6 +2830,10 @@ const globalSetupTimeoutId = setTimeout(() => {
 
 // Register timeout for cleanup
 resourceManager.addTimer(globalSetupTimeoutId);
+
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │ 5.2 Event Handlers - User Interaction Processing                          │
+// └─────────────────────────────────────────────────────────────────────────────┘
 
 // Extension state
 let extensionEnabled = true;
@@ -2203,28 +2854,42 @@ const connectButtonHandler = function(e) {
     target.closest('[aria-label*="Connect"]');
     
   if (isConnectButton) {
-    elementFinder.log('Connect button clicked! Queuing connection flow...');
+    elementFinder.log('Connect button clicked! Processing with error boundary...');
     
-    // Queue the connection operation to prevent race conditions
-    operationQueue.enqueue('connect_button_click', async () => {
-      await waitForConnectionModal();
+    // Wrap connection flow with error boundary for comprehensive protection
+    errorBoundary.protect('connect_button_click', async () => {
+      // Queue the connection operation to prevent race conditions
+      return operationQueue.enqueue('connect_button_click', async () => {
+        await waitForConnectionModal();
+      }, {
+        timeout: 15000,
+        retryable: false, // Don't retry click events
+        metadata: {
+          buttonElement: target,
+          url: window.location.href,
+          timestamp: Date.now()
+        },
+        onSuccess: () => {
+          elementFinder.log('✓ Connection flow completed successfully');
+        },
+        onFailure: (error) => {
+          elementFinder.log('✗ Connection flow failed:', error.message);
+        }
+      });
     }, {
-      timeout: 15000,
-      retryable: false, // Don't retry click events
+      enableCircuitBreaker: true,
+      enableRetry: false,
+      enableGracefulDegradation: true,
+      userFriendlyName: 'Connection Flow',
+      timeout: 20000,
       metadata: {
         buttonElement: target,
         url: window.location.href,
         timestamp: Date.now()
-      },
-      onSuccess: () => {
-        elementFinder.log('✓ Connection flow completed successfully');
-      },
-      onFailure: (error) => {
-        elementFinder.log('✗ Connection flow failed:', error.message);
-        showNotification('⚠️ Connection flow failed. Please try again.', 'error');
       }
     }).catch(error => {
-      elementFinder.log('Connection flow queue error:', error.message);
+      elementFinder.log('Connection flow error boundary failed:', error.message);
+      // Error boundary handles user notification, no need for additional error handling
     });
   }
 };
@@ -2232,13 +2897,19 @@ const connectButtonHandler = function(e) {
 // Add listener through resource manager for proper cleanup
 resourceManager.addListener(document, 'click', connectButtonHandler);
 
-// Smart modal detection using MutationObserver and OperationQueue
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │ 5.3 Business Logic - Core Extension Workflow                              │
+// └─────────────────────────────────────────────────────────────────────────────┘
+
+// Smart modal detection using MutationObserver, OperationQueue and Error Boundary
 async function waitForConnectionModal() {
   elementFinder.log('Waiting for connection modal to appear...');
   
-  // Queue modal detection to prevent overlapping operations
-  return operationQueue.enqueue('modal_detection', async () => {
-    return new Promise((resolve, reject) => {
+  // Wrap modal detection with error boundary
+  return errorBoundary.protect('modal_detection', async () => {
+    // Queue modal detection to prevent overlapping operations
+    return operationQueue.enqueue('modal_detection', async () => {
+      return new Promise((resolve, reject) => {
   let attempts = 0;
   const maxAttempts = 50; // 5 seconds at 100ms intervals
   const startTime = Date.now();
@@ -2256,8 +2927,8 @@ async function waitForConnectionModal() {
     if (modalExists) {
       const actualTime = Date.now() - startTime;
       elementFinder.log(`✓ Modal detected after ${actualTime}ms`);
-          removeObserver(); // Use cleanup function
-          resolve(modalExists);
+            removeObserver(); // Use cleanup function
+            resolve(modalExists);
       return;
     }
     
@@ -2265,7 +2936,7 @@ async function waitForConnectionModal() {
     if (attempts >= maxAttempts) {
       const actualTime = Date.now() - startTime;
       elementFinder.log(`✗ Modal not detected after ${actualTime}ms`);
-          removeObserver(); // Use cleanup function
+            removeObserver(); // Use cleanup function
       
       // Log timing error with comprehensive details
       elementFinder.errorReporter.logTimingError(
@@ -2279,12 +2950,12 @@ async function waitForConnectionModal() {
         }
       );
       
-          reject(new Error('Connection modal not detected after timeout'));
-        }
-      });
-      
-      // Register observer with resource manager for proper cleanup
-      const removeObserver = resourceManager.addObserver(observer, document.body, {
+            reject(new Error('Connection modal not detected after timeout'));
+          }
+        });
+        
+        // Register observer with resource manager for proper cleanup
+        const removeObserver = resourceManager.addObserver(observer, document.body, {
         childList: true,
     subtree: true,
     attributes: true,
@@ -2292,46 +2963,59 @@ async function waitForConnectionModal() {
       });
       
   // Also do an immediate check in case modal is already there
-      const timeoutId = setTimeout(() => {
+        const timeoutId = setTimeout(() => {
     const modalExists = 
       document.querySelector('.artdeco-modal') ||
       document.querySelector('[role="dialog"]');
     
     if (modalExists) {
       elementFinder.log('✓ Modal already present, proceeding immediately');
-          removeObserver(); // Use cleanup function
-          resolve(modalExists);
+            removeObserver(); // Use cleanup function
+            resolve(modalExists);
     }
   }, 100);
-      
-      // Register timeout for cleanup
-      resourceManager.addTimer(timeoutId);
+        
+        // Register timeout for cleanup
+        resourceManager.addTimer(timeoutId);
+      });
+    }, {
+      timeout: 8000, // 8 second timeout for modal detection
+      retryable: true,
+      onSuccess: async (modalResult) => {
+        // Queue the message filling operation with error boundary protection
+        await errorBoundary.protect('message_insertion', async () => {
+          return operationQueue.enqueue('message_insertion', async () => {
+            await fillConnectionMessage();
+          }, {
+            timeout: 10000,
+            retryable: true
+          });
+        }, {
+          enableCircuitBreaker: true,
+          enableRetry: true,
+          enableGracefulDegradation: true,
+          userFriendlyName: 'Message Processing',
+          timeout: 12000,
+          metadata: {
+            modalDetected: true,
+            modalElement: modalResult
+          }
+        });
+      },
+      onFailure: (error) => {
+        // Let error boundary handle this
+        throw error;
+      }
     });
   }, {
-    timeout: 8000, // 8 second timeout for modal detection
-    retryable: true,
-    onSuccess: async () => {
-      // Queue the message filling operation
-      await operationQueue.enqueue('message_insertion', async () => {
-        await fillConnectionMessage();
-      }, {
-        timeout: 10000,
-        retryable: true,
-        onFailure: (error) => {
-          elementFinder.errorReporter.showUserError(
-            '⚠️ Failed to fill connection message.',
-            'error',
-            ['Try clicking Connect again', 'Check if modal is responsive']
-          );
-        }
-      });
-    },
-    onFailure: (error) => {
-      elementFinder.errorReporter.showUserError(
-        '⚠️ Connection modal not detected. Try clicking Connect again.',
-        'error',
-        ['Refresh the page', 'Check internet connection', 'Try different profile']
-      );
+    enableCircuitBreaker: true,
+    enableRetry: true,
+    enableGracefulDegradation: true,
+    userFriendlyName: 'Modal Detection',
+    timeout: 10000,
+    metadata: {
+      url: window.location.href,
+      timestamp: Date.now()
     }
   });
 }
@@ -2371,18 +3055,23 @@ async function fillConnectionMessage() {
     try {
       addNoteResult.element.click();
       
-      // Queue textarea detection to prevent race conditions
-      await operationQueue.enqueue('textarea_detection', async () => {
-        await waitForTextareaAndInsert();
+      // Wrap textarea detection with error boundary
+      await errorBoundary.protect('textarea_detection', async () => {
+        return operationQueue.enqueue('textarea_detection', async () => {
+          await waitForTextareaAndInsert();
+        }, {
+          timeout: 5000,
+          retryable: true
+        });
       }, {
-        timeout: 5000,
-        retryable: true,
-        onFailure: (error) => {
-          elementFinder.errorReporter.showUserError(
-            '⚠️ Message box not found after clicking "Add a note".',
-            'error',
-            ['Try clicking "Add a note" button manually', 'Wait for modal to fully load', 'Refresh the page']
-          );
+        enableCircuitBreaker: true,
+        enableRetry: true,
+        enableGracefulDegradation: true,
+        userFriendlyName: 'Textarea Detection',
+        timeout: 7000,
+        metadata: {
+          addNoteClicked: true,
+          timestamp: Date.now()
         }
       });
       
@@ -2913,6 +3602,10 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │ 4.2 Debug Tools - Development & Testing Utilities                         │
+// └─────────────────────────────────────────────────────────────────────────────┘
+
 // Function to setup global debug objects
 function setupGlobalObjects() {
   console.log('[LI Helper] Creating global debug objects...');
@@ -3134,6 +3827,173 @@ window.liHelperDebug = {
   cancelPendingOperations: () => {
     operationQueue.cancelAll();
     console.log('[LI Helper] All pending operations cancelled');
+  },
+  
+  // Error Boundary and Circuit Breaker monitoring
+  getCircuitBreakerStats: () => {
+    const stats = errorBoundary.getCircuitBreakerStats();
+    console.log('[LI Helper] Circuit breaker statistics:', stats);
+    console.table(Object.entries(stats).map(([operation, data]) => ({
+      operation,
+      state: data.state,
+      failures: data.consecutiveFailures,
+      successes: data.consecutiveSuccesses,
+      uptime: data.uptime + '%',
+      lastError: data.lastError || 'None'
+    })));
+    return stats;
+  },
+  
+  testErrorBoundary: async () => {
+    console.log('[LI Helper] Testing error boundary with simulated failures...');
+    
+    const results = {};
+    
+    // Test 1: Successful operation
+    try {
+      const result1 = await errorBoundary.protect('test_success', async () => {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return 'Success result';
+      }, {
+        enableCircuitBreaker: true,
+        userFriendlyName: 'Test Success Operation'
+      });
+      
+      results.successTest = { success: true, result: result1 };
+      console.log('✅ Success test passed:', result1);
+    } catch (error) {
+      results.successTest = { success: false, error: error.message };
+    }
+    
+    // Test 2: Failing operation with fallback
+    try {
+      errorBoundary.fallbackStrategies.set('test_fallback', async (error) => {
+        return 'Fallback executed successfully';
+      });
+      
+      const result2 = await errorBoundary.protect('test_fallback', async () => {
+        throw new Error('Simulated failure');
+      }, {
+        enableCircuitBreaker: true,
+        enableGracefulDegradation: true,
+        userFriendlyName: 'Test Fallback Operation'
+      });
+      
+      results.fallbackTest = { success: true, result: result2 };
+      console.log('✅ Fallback test passed:', result2);
+    } catch (error) {
+      results.fallbackTest = { success: false, error: error.message };
+    }
+    
+    // Test 3: Circuit breaker trigger test
+    try {
+      let attempts = 0;
+      const failingOperation = async () => {
+        attempts++;
+        throw new Error(`Failure attempt ${attempts}`);
+      };
+      
+      // Trigger circuit breaker by causing multiple failures
+      for (let i = 0; i < 4; i++) {
+        try {
+          await errorBoundary.protect('test_circuit_breaker', failingOperation, {
+            enableCircuitBreaker: true,
+            enableGracefulDegradation: false,
+            enableRetry: false,
+            userFriendlyName: 'Test Circuit Breaker'
+          });
+        } catch (error) {
+          // Expected to fail
+        }
+      }
+      
+      const circuitStats = errorBoundary.getCircuitBreakerStats();
+      results.circuitBreakerTest = {
+        success: true,
+        circuitState: circuitStats.test_circuit_breaker?.state || 'Unknown',
+        failures: circuitStats.test_circuit_breaker?.consecutiveFailures || 0
+      };
+      
+      console.log('✅ Circuit breaker test completed:', results.circuitBreakerTest);
+    } catch (error) {
+      results.circuitBreakerTest = { success: false, error: error.message };
+    }
+    
+    console.log('Error boundary test results:', results);
+    return results;
+  },
+  
+  testFallbackStrategies: async () => {
+    console.log('[LI Helper] Testing fallback strategies...');
+    
+    const strategies = ['modal_detection', 'textarea_detection', 'message_insertion', 'name_detection'];
+    const results = {};
+    
+    for (const strategy of strategies) {
+      try {
+        console.log(`Testing fallback for: ${strategy}`);
+        const fallbackFn = errorBoundary.fallbackStrategies.get(strategy);
+        
+        if (fallbackFn) {
+          const result = await fallbackFn(new Error('Test error'), { test: true });
+          results[strategy] = { success: true, result };
+          console.log(`✅ ${strategy} fallback executed:`, result);
+        } else {
+          results[strategy] = { success: false, error: 'No fallback strategy found' };
+          console.log(`❌ ${strategy} has no fallback strategy`);
+        }
+      } catch (error) {
+        results[strategy] = { success: false, error: error.message };
+        console.log(`❌ ${strategy} fallback failed:`, error.message);
+      }
+    }
+    
+    return results;
+  },
+  
+  resetCircuitBreakers: () => {
+    errorBoundary.resetAllCircuitBreakers();
+    console.log('[LI Helper] All circuit breakers reset');
+  },
+  
+  resetCircuitBreaker: (operationName) => {
+    if (!operationName) {
+      console.log('Usage: liHelperDebug.resetCircuitBreaker("operation_name")');
+      console.log('Available operations:', Object.keys(errorBoundary.getCircuitBreakerStats()));
+      return;
+    }
+    
+    errorBoundary.resetCircuitBreaker(operationName);
+    console.log(`[LI Helper] Circuit breaker reset for: ${operationName}`);
+  },
+  
+  simulateFailure: async (operationName) => {
+    if (!operationName) {
+      console.log('Usage: await liHelperDebug.simulateFailure("operation_name")');
+      console.log('Available operations: connect_button_click, modal_detection, textarea_detection, message_insertion, name_detection');
+      return;
+    }
+    
+    console.log(`[LI Helper] Simulating failure for: ${operationName}`);
+    
+    try {
+      await errorBoundary.protect(operationName, async () => {
+        throw new Error(`Simulated failure for ${operationName}`);
+      }, {
+        enableCircuitBreaker: true,
+        enableGracefulDegradation: true,
+        userFriendlyName: `Simulated ${operationName}`,
+        metadata: { simulated: true }
+      });
+    } catch (error) {
+      console.log(`Failure simulation completed for ${operationName}:`, error.message);
+    }
+    
+    // Show updated circuit breaker state
+    const stats = errorBoundary.getCircuitBreakerStats();
+    if (stats[operationName]) {
+      console.log(`Circuit breaker state for ${operationName}:`, stats[operationName]);
+    }
   }
 };
 
@@ -3361,12 +4221,17 @@ liHelperTemplates.add("casual",
 };
 
   console.log('[LI Helper] Global objects created successfully!');
-  console.log('🔧 Debug commands: liHelperDebug.getErrors(), liHelperDebug.getResourceStats(), liHelperDebug.getResilientStats(), liHelperDebug.getQueueStats()');
-  console.log('🧪 Testing commands: await liHelperDebug.testResilientFinder(), await liHelperDebug.testOperationQueue(), await liHelperDebug.testOperationRetry()');
+  console.log('🔧 Debug commands: liHelperDebug.getErrors(), liHelperDebug.getResourceStats(), liHelperDebug.getResilientStats(), liHelperDebug.getQueueStats(), liHelperDebug.getCircuitBreakerStats()');
+  console.log('🧪 Testing commands: await liHelperDebug.testResilientFinder(), await liHelperDebug.testOperationQueue(), await liHelperDebug.testErrorBoundary()');
   console.log('⚡ Queue commands: liHelperDebug.getOperationHistory(), liHelperDebug.cancelPendingOperations(), liHelperDebug.clearOperationHistory()');
+  console.log('🛡️ Error Boundary: await liHelperDebug.testFallbackStrategies(), liHelperDebug.resetCircuitBreakers(), await liHelperDebug.simulateFailure("operation_name")');
   console.log('💾 Storage commands: liHelperStorage.getConfig(), liHelperStorage.setupPersonal(), liHelperStorage.testVariables()');
   console.log('📝 Template commands: liHelperTemplates.list(), liHelperTemplates.help(), await liHelperTemplates.add()');
 }
+
+// ┌─────────────────────────────────────────────────────────────────────────────┐
+// │ 5.4 System Startup - Final Initialization & Global Setup                  │
+// └─────────────────────────────────────────────────────────────────────────────┘
 
 // Initialize global objects immediately
 setupGlobalObjects();
@@ -3399,14 +4264,19 @@ const accessibilityTestTimeoutId = setTimeout(() => {
     console.log('\n🧪 Test Systems:');
     console.log('  await liHelperDebug.testResilientFinder() // Test DOM detection');
     console.log('  await liHelperDebug.testOperationQueue()  // Test operation queue');
-    console.log('  await liHelperDebug.testOperationRetry()  // Test retry logic');
+    console.log('  await liHelperDebug.testErrorBoundary()   // Test error boundaries');
     console.log('\n📊 Monitor Performance:');
     console.log('  liHelperDebug.getResilientStats()        // DOM finder stats');
     console.log('  liHelperDebug.getQueueStats()            // Operation queue stats');
+    console.log('  liHelperDebug.getCircuitBreakerStats()   // Error boundary stats');
     console.log('  liHelperDebug.getResourceStats()         // Memory usage');
     console.log('\n⚡ Operation Management:');
     console.log('  liHelperDebug.getOperationHistory()      // View operation history');
     console.log('  liHelperDebug.cancelPendingOperations()  // Cancel pending operations');
+    console.log('\n🛡️ Error Boundary Testing:');
+    console.log('  await liHelperDebug.testFallbackStrategies() // Test fallback strategies');
+    console.log('  await liHelperDebug.simulateFailure("modal_detection") // Simulate failures');
+    console.log('  liHelperDebug.resetCircuitBreakers()     // Reset all circuit breakers');
   }
 }, 2000);
 
@@ -3445,6 +4315,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 elementFinder.errorReporter.logError('INFO', 'Extension loaded successfully', {
   url: window.location.href,
   timestamp: Date.now(),
-  version: '2.1 - Template System with Popup UI',
+  version: '3.1 - Enterprise-Grade Modular Architecture',
   availableTemplates: Object.keys(templateProcessor.defaultTemplates)
 });

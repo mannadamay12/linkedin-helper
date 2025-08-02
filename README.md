@@ -1,85 +1,91 @@
 # LinkedIn Connection Helper
 
-A Chrome extension that automatically personalizes connection request messages on LinkedIn based on the recipient's profile information.
+A browser extension that automates personalized connection messages on LinkedIn with intelligent profile detection and message customization.
+
+## Overview
+
+This extension detects LinkedIn profile information and automatically generates contextual connection messages. It includes a configuration interface for customizing personal information, message templates, and extension behavior.
 
 ## Features
 
-- **Smart Name Detection**: Automatically detects the recipient's name from LinkedIn's connection modal
-- **Role & Company Recognition**: Extracts professional information to personalize messages
-- **Contextual Templates**: Different message templates for engineers, recruiters, and other professionals
-- **Fallback Support**: Manual name entry option if automatic detection fails
-- **Visual Feedback**: Success/error notifications and highlighted message insertion
-- **Debug Mode**: Console logging for troubleshooting
+- Automatic name and profile detection from LinkedIn pages
+- Role-based message templates (engineers, recruiters, general professionals)
+- Custom template creation and management
+- Configurable personal information for message personalization
+- Robust error handling with fallback strategies
+- Memory management and resource cleanup
+- Adaptive DOM detection resilient to LinkedIn UI changes
 
 ## Installation
 
-### Method 1: Load as Unpacked Extension (Development)
-
-1. Clone or download this repository to your local machine
+1. Download or clone this repository
 2. Open Chrome and navigate to `chrome://extensions/`
-3. Enable "Developer mode" in the top right corner
-4. Click "Load unpacked" button
-5. Select the folder containing this extension's files
-6. The extension icon should appear in your Chrome toolbar
+3. Enable "Developer mode"
+4. Click "Load unpacked" and select the extension folder
+5. The extension icon will appear in your browser toolbar
 
-### Method 2: Install from ZIP
+## Configuration
 
-1. Download the extension as a ZIP file
-2. Extract the ZIP to a folder on your computer
-3. Follow steps 2-6 from Method 1 above
+Click the extension icon to access the configuration panel with three sections:
 
-## How to Use
+- **Personal Info**: Your name, title, background, university, and contact details
+- **Templates**: Default and custom message templates with variable substitution
+- **Settings**: Extension preferences and data management options
 
-1. Navigate to LinkedIn and go to someone's profile
-2. Click the "Connect" button
-3. When the connection modal appears, click "Add a note"
-4. The extension will automatically:
-   - Detect the person's name, role, and company
-   - Insert a personalized message based on their profile
-   - Show a success notification
+## Usage
 
-## Message Templates
+1. Navigate to a LinkedIn profile
+2. Click "Connect" on the profile
+3. Click "Add a note" in the connection modal
+4. The extension automatically detects profile information and inserts a personalized message
+5. Review and send the connection request
 
-The extension uses different templates based on the recipient's role:
+## Architecture
 
-- **Engineers/Developers**: Focuses on learning about their technical journey
-- **Recruiters/Hiring Managers**: Emphasizes job opportunities and skills fit
-- **General Professionals**: Asks about work culture and career insights
-- **Default**: A friendly connection request for when role detection fails
+The extension uses a modular architecture with the following components:
 
-## Troubleshooting
-
-- **Name not detected**: The extension will prompt you to enter the name manually
-- **Message not inserted**: Check the browser console for error messages
-- **Extension not working**: Ensure you're on linkedin.com and the extension is enabled
-
-## Privacy & Security
-
-- This extension works entirely in your browser
-- No data is sent to external servers
-- Only modifies content on linkedin.com domains
-
-## Technical Details
-
-- **Manifest Version**: 3
-- **Permissions**: activeTab, scripting
-- **Content Script**: Runs at document_idle
-- **Supported URLs**: https://www.linkedin.com/*
+- **Core Infrastructure**: Memory management, operation queuing, error boundaries
+- **DOM Layer**: Element detection and LinkedIn-specific operations  
+- **Data Layer**: Configuration storage and template processing
+- **Application Layer**: Event handling and business logic
 
 ## File Structure
 
 ```
 linkedin-helper/
 ├── manifest.json       # Extension configuration
-├── icon.png           # Extension icon (128x128)
-├── content.js         # Main content script
-└── README.md          # This file
+├── content.js          # Main content script with modular architecture
+├── popup.html          # Configuration interface
+├── popup.css           # Interface styling
+├── popup.js            # Configuration logic
+├── icon.png            # Extension icon
+└── README.md           # Documentation
 ```
 
-## Contributing
+## Technical Details
 
-Feel free to fork this repository and submit pull requests for improvements!
+- **Version**: 3.2
+- **Manifest**: Version 3
+- **Permissions**: activeTab, storage
+- **Target**: https://www.linkedin.com/*
+- **Architecture**: Modular content script with popup interface
+
+## Development
+
+The extension includes debug utilities accessible via browser console:
+
+- `liHelperDebug.getResourceStats()` - Memory usage monitoring
+- `liHelperDebug.getResilientStats()` - DOM detection performance
+- `liHelperStorage.getConfig()` - Current configuration
+- `liHelperTemplates.list()` - Available templates
+
+## Privacy
+
+- All processing occurs locally in the browser
+- No external server communication
+- Data stored locally using Chrome storage API
+- Only operates on LinkedIn domains
 
 ## License
 
-This project is for educational purposes. Please use responsibly and in accordance with LinkedIn's terms of service.
+This project is for educational purposes. Use responsibly and in accordance with LinkedIn's terms of service.
