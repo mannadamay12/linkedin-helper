@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <div class="header">
+      <div class="logo">
+        <span class="icon">🤝</span>
+        <span class="title">LinkedIn Helper</span>
+      </div>
+      <div class="status">
+        <span id="connection-status" class="status-indicator">●</span>
+        <span id="status-text">Ready</span>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="tabs">
+      <button class="tab-button active" data-tab="personal">
+        <span class="tab-icon">👤</span>
+        Personal
+      </button>
+      <button class="tab-button" data-tab="templates">
+        <span class="tab-icon">📝</span>
+        Templates
+      </button>
+      <button class="tab-button" data-tab="settings">
+        <span class="tab-icon">⚙️</span>
+        Settings
+      </button>
+    </div>
+
+    <!-- Tab Contents -->
+    <div class="tab-content">
+      
+      <!-- Personal Info Tab -->
+      <div id="personal-tab" class="tab-panel active">
+        <div class="section-title">Personal Information</div>
+        
+        <form id="personal-form">
+          <div class="form-group">
+            <label for="name">Your Name</label>
+            <input type="text" id="name" placeholder="e.g., John Smith" maxlength="50">
+          </div>
+          
+          <div class="form-group">
+            <label for="title">Your Title/Role</label>
+            <input type="text" id="title" placeholder="e.g., Software Engineer at Google" maxlength="100">
+          </div>
+          
+          <div class="form-group">
+            <label for="background">Your Background</label>
+            <input type="text" id="background" placeholder="e.g., passionate about AI" maxlength="100">
+          </div>
+          
+          <div class="form-group">
+            <label for="university">University (Optional)</label>
+            <input type="text" id="university" placeholder="e.g., Stanford University" maxlength="100">
+          </div>
+          
+          <div class="form-group">
+            <label for="location">Location (Optional)</label>
+            <input type="text" id="location" placeholder="e.g., San Francisco, CA" maxlength="50">
+          </div>
+          
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save Information</button>
+            <button type="button" class="btn btn-secondary" id="test-variables">Test Variables</button>
+          </div>
+        </form>
+
+        <div class="info-box">
+          <div class="info-title">💡 How It Works</div>
+          <div class="info-text">
+            Your information will be used in message templates as variables like {myName}, {myTitle}, {myBackground}.
+          </div>
+        </div>
+      </div>
+
+      <!-- Templates Tab -->
+      <div id="templates-tab" class="tab-panel">
+        <div class="section-title">Message Templates</div>
+        
+        <div class="template-selector">
+          <label for="default-template">Default Template</label>
+          <select id="default-template">
+            <option value="general">General Professional</option>
+            <option value="engineer">Software Engineer</option>
+            <option value="recruiter">Recruiter/Hiring Manager</option>
+            <option value="student">Student/Academic</option>
+            <option value="sameCompany">Same Company</option>
+            <option value="sameUniversity">Alumni</option>
+          </select>
+        </div>
+
+        <div class="template-options">
+          <label class="checkbox-wrapper">
+            <input type="checkbox" id="auto-select-template" checked>
+            <span class="checkmark"></span>
+            Auto-select template based on profile
+          </label>
+          <label class="checkbox-wrapper">
+            <input type="checkbox" id="preview-before-send" checked>
+            <span class="checkmark"></span>
+            Preview message before inserting
+          </label>
+        </div>
+
+        <div class="template-preview">
+          <div class="preview-title">Template Preview</div>
+          <div id="template-preview-text" class="preview-text">
+            Select a template to see preview...
+          </div>
+        </div>
+
+        <div class="template-actions">
+          <button class="btn btn-primary" id="add-custom-template">+ Add Custom Template</button>
+          <button class="btn btn-secondary" id="manage-templates">Manage Templates</button>
+        </div>
+
+        <!-- Custom Template Modal (Hidden) -->
+        <div id="custom-template-modal" class="modal hidden">
+          <div class="modal-content">
+            <div class="modal-header">
+              <span class="modal-title">Create Custom Template</span>
+              <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+              <div class="form-group">
+                <label for="template-name">Template Name</label>
+                <input type="text" id="template-name" placeholder="e.g., Casual Outreach">
+              </div>
+              <div class="form-group">
+                <label for="template-content">Template Content</label>
+                <textarea id="template-content" rows="6" placeholder="Hi {firstName}! I'm {myName}..."></textarea>
+              </div>
+              <div class="available-variables">
+                <strong>Available Variables:</strong>
+                <span class="variable">{firstName}</span>
+                <span class="variable">{company}</span>
+                <span class="variable">{role}</span>
+                <span class="variable">{myName}</span>
+                <span class="variable">{myTitle}</span>
+                <span class="variable">{myBackground}</span>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-primary" id="save-custom-template">Save Template</button>
+              <button class="btn btn-secondary" id="cancel-custom-template">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings Tab -->
+      <div id="settings-tab" class="tab-panel">
+        <div class="section-title">Extension Settings</div>
+        
+        <div class="settings-group">
+          <div class="setting-item">
+            <label class="checkbox-wrapper">
+              <input type="checkbox" id="extension-enabled" checked>
+              <span class="checkmark"></span>
+              Extension Enabled
+            </label>
+            <div class="setting-description">Enable/disable the LinkedIn Connection Helper</div>
+          </div>
+
+          <div class="setting-item">
+            <label class="checkbox-wrapper">
+              <input type="checkbox" id="notifications-enabled" checked>
+              <span class="checkmark"></span>
+              Show Notifications
+            </label>
+            <div class="setting-description">Display success/error notifications</div>
+          </div>
+
+          <div class="setting-item">
+            <label class="checkbox-wrapper">
+              <input type="checkbox" id="debug-mode">
+              <span class="checkmark"></span>
+              Debug Mode
+            </label>
+            <div class="setting-description">Enable detailed console logging</div>
+          </div>
+
+          <div class="setting-item">
+            <label class="checkbox-wrapper">
+              <input type="checkbox" id="show-detected-info" checked>
+              <span class="checkmark"></span>
+              Show Detected Info
+            </label>
+            <div class="setting-description">Display detected profile information</div>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <div class="section-title">Data Management</div>
+          
+          <div class="data-actions">
+            <button class="btn btn-secondary" id="export-settings">Export Settings</button>
+            <button class="btn btn-secondary" id="import-settings">Import Settings</button>
+            <button class="btn btn-danger" id="reset-settings">Reset to Defaults</button>
+          </div>
+          
+          <div class="storage-info">
+            <div class="storage-label">Storage Usage:</div>
+            <div class="storage-bar">
+              <div id="storage-progress" class="storage-fill" style="width: 0%"></div>
+            </div>
+            <div id="storage-text" class="storage-text">Loading...</div>
+          </div>
+        </div>
+
+        <div class="footer-info">
+          <div class="version">v2.1 - Template System</div>
+          <div class="privacy">No data sent to external servers</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay hidden">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">Loading...</div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="notification-toast" class="notification-toast hidden">
+      <span id="notification-message"></span>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
