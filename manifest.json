@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "LinkedIn Connection Helper",
-    "version": "3.2",
+    "version": "5.0",
     "description": "Auto-fills personalized connection messages on LinkedIn with advanced resilience and memory management",
     "permissions": ["activeTab", "storage"],
     "content_scripts": [
