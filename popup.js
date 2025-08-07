@@ -45,15 +45,27 @@ class PopupManager {
       this.testVariables();
     });
 
-    // Template selector
-    document.getElementById('default-template').addEventListener('change', (e) => {
-      this.updateDefaultTemplate(e.target.value);
-      this.updateTemplatePreview();
+    // Message type radio buttons
+    document.querySelectorAll('input[name="messageType"]').forEach(radio => {
+      radio.addEventListener('change', (e) => {
+        this.handleMessageTypeChange(e.target.value);
+        this.updateTemplatePreview();
+      });
+    });
+
+    // Template input fields
+    ['companyName', 'positionTitle', 'opportunityType', 'timeline', 'jobLinks', 'recipientName'].forEach(id => {
+      const element = document.getElementById(id);
+      if (element) {
+        element.addEventListener('input', () => {
+          this.updateTemplatePreview();
+        });
+      }
     });
 
     // Template checkboxes
-    document.getElementById('auto-select-template').addEventListener('change', (e) => {
-      this.updateTemplateSetting('autoSelectTemplate', e.target.checked);
+    document.getElementById('auto-detect-profile').addEventListener('change', (e) => {
+      this.updateTemplateSetting('autoDetectProfile', e.target.checked);
     });
 
     document.getElementById('preview-before-send').addEventListener('change', (e) => {
@@ -61,25 +73,16 @@ class PopupManager {
     });
 
     // Template actions
-    document.getElementById('add-custom-template').addEventListener('click', () => {
-      this.showCustomTemplateModal();
+    document.getElementById('save-template-settings').addEventListener('click', () => {
+      this.saveTemplateSettings();
     });
 
-    document.getElementById('manage-templates').addEventListener('click', () => {
-      this.openTemplateManager();
+    document.getElementById('reset-template').addEventListener('click', () => {
+      this.resetTemplateFields();
     });
 
-    // Custom template modal
-    document.getElementById('save-custom-template').addEventListener('click', () => {
-      this.saveCustomTemplate();
-    });
-
-    document.getElementById('cancel-custom-template').addEventListener('click', () => {
-      this.hideCustomTemplateModal();
-    });
-
-    document.querySelector('.modal-close').addEventListener('click', () => {
-      this.hideCustomTemplateModal();
+    document.getElementById('copy-message').addEventListener('click', () => {
+      this.copyMessageToClipboard();
     });
 
     // Settings
@@ -146,23 +149,29 @@ class PopupManager {
   getDefaultConfig() {
     return {
       personalInfo: {
-        name: '',
-        title: '',
-        background: '',
-        university: '',
-        location: ''
+        firstName: 'Sachin',
+        lastName: 'Adlakha',
+        email: 'sa9082@nyu.edu',
+        phone: '6466335776',
+        university: 'NYU',
+        degree: 'MS in Computer Science',
+        resumeUrl: ''
       },
       templateSettings: {
-        defaultTemplate: 'general',
-        autoSelectTemplate: true,
-        customTemplates: {},
-        enabledTemplates: ['engineer', 'recruiter', 'student', 'general', 'sameCompany', 'sameUniversity']
+        messageType: 'newConnection',
+        companyName: '',
+        positionTitle: 'Software Engineer Intern',
+        opportunityType: 'internship opportunities',
+        timeline: 'Summer 2025',
+        jobLinks: '',
+        recipientName: '',
+        autoDetectProfile: true,
+        previewBeforeSend: true
       },
       preferences: {
         extensionEnabled: true,
         debugMode: false,
         notificationsEnabled: true,
-        previewBeforeSend: true,
         showDetectedInfo: true
       }
     };
@@ -202,19 +211,36 @@ class PopupManager {
   loadPersonalInfoForm() {
     const personalInfo = this.currentConfig.personalInfo;
     
-    document.getElementById('name').value = personalInfo.name || '';
-    document.getElementById('title').value = personalInfo.title || '';
-    document.getElementById('background').value = personalInfo.background || '';
+    document.getElementById('firstName').value = personalInfo.firstName || '';
+    document.getElementById('lastName').value = personalInfo.lastName || '';
+    document.getElementById('email').value = personalInfo.email || '';
+    document.getElementById('phone').value = personalInfo.phone || '';
     document.getElementById('university').value = personalInfo.university || '';
-    document.getElementById('location').value = personalInfo.location || '';
+    document.getElementById('degree').value = personalInfo.degree || '';
+    document.getElementById('resumeUrl').value = personalInfo.resumeUrl || '';
   }
 
   loadTemplateSettings() {
     const templateSettings = this.currentConfig.templateSettings;
     
-    document.getElementById('default-template').value = templateSettings.defaultTemplate || 'general';
-    document.getElementById('auto-select-template').checked = templateSettings.autoSelectTemplate !== false;
+    // Set the radio button for message type
+    const messageType = templateSettings.messageType || 'newConnection';
+    const radioButton = document.querySelector(`input[name="messageType"][value="${messageType}"]`);
+    if (radioButton) {
+      radioButton.checked = true;
+    }
+    
+    document.getElementById('companyName').value = templateSettings.companyName || '';
+    document.getElementById('positionTitle').value = templateSettings.positionTitle || '';
+    document.getElementById('opportunityType').value = templateSettings.opportunityType || 'internship opportunities';
+    document.getElementById('timeline').value = templateSettings.timeline || 'Summer 2025';
+    document.getElementById('jobLinks').value = templateSettings.jobLinks || '';
+    document.getElementById('recipientName').value = templateSettings.recipientName || '';
+    document.getElementById('auto-detect-profile').checked = templateSettings.autoDetectProfile !== false;
     document.getElementById('preview-before-send').checked = templateSettings.previewBeforeSend !== false;
+    
+    this.handleMessageTypeChange(messageType);
+    this.updateTemplatePreview();
   }
 
   loadPreferences() {
@@ -246,16 +272,18 @@ class PopupManager {
       this.showLoading(true);
       
       const personalInfo = {
-        name: document.getElementById('name').value.trim(),
-        title: document.getElementById('title').value.trim(),
-        background: document.getElementById('background').value.trim(),
+        firstName: document.getElementById('firstName').value.trim(),
+        lastName: document.getElementById('lastName').value.trim(),
+        email: document.getElementById('email').value.trim(),
+        phone: document.getElementById('phone').value.trim(),
         university: document.getElementById('university').value.trim(),
-        location: document.getElementById('location').value.trim()
+        degree: document.getElementById('degree').value.trim(),
+        resumeUrl: document.getElementById('resumeUrl').value.trim()
       };
 
       // Validate required fields
-      if (!personalInfo.name || !personalInfo.title || !personalInfo.background) {
-        this.showNotification('Please fill in Name, Title, and Background fields', 'warning');
+      if (!personalInfo.firstName || !personalInfo.lastName || !personalInfo.email) {
+        this.showNotification('Please fill in First Name, Last Name, and Email fields', 'warning');
         return;
       }
 
@@ -289,20 +317,138 @@ class PopupManager {
   testVariables() {
     const personalInfo = this.currentConfig.personalInfo;
     const variables = {
-      firstName: 'John',
-      company: 'TechCorp',
-      role: 'Software Engineer',
-      myName: personalInfo.name || 'Your Name',
-      myTitle: personalInfo.title || 'Your Title',
-      myBackground: personalInfo.background || 'Your Background'
+      firstName: personalInfo.firstName || 'Sachin',
+      lastName: personalInfo.lastName || 'Adlakha',
+      fullName: `${personalInfo.firstName} ${personalInfo.lastName}`,
+      email: personalInfo.email || 'sa9082@nyu.edu',
+      phone: personalInfo.phone || '6466335776',
+      university: personalInfo.university || 'NYU',
+      degree: personalInfo.degree || 'MS in Computer Science',
+      resumeUrl: personalInfo.resumeUrl || '[Resume URL]'
     };
 
-    let message = 'Template Variables Test:\n\n';
+    let message = 'Your Saved Information:\n\n';
     Object.entries(variables).forEach(([key, value]) => {
-      message += `{${key}} → ${value}\n`;
+      message += `${key}: ${value}\n`;
     });
 
     alert(message);
+  }
+
+  handleMessageTypeChange(messageType) {
+    const jobLinksGroup = document.getElementById('jobLinksGroup');
+    const recipientNameGroup = document.getElementById('recipientNameGroup');
+    const usageHint = document.getElementById('template-usage-hint');
+    
+    if (messageType === 'afterAcceptance') {
+      jobLinksGroup.style.display = 'block';
+      recipientNameGroup.style.display = 'block';
+      usageHint.innerHTML = '✅ Use in messaging/chat after connection accepted';
+    } else if (messageType === 'alreadyConnected') {
+      jobLinksGroup.style.display = 'block';
+      recipientNameGroup.style.display = 'none';
+      usageHint.innerHTML = '💬 Use in messaging for existing connections';
+    } else {
+      jobLinksGroup.style.display = 'none';
+      recipientNameGroup.style.display = 'none';
+      usageHint.innerHTML = '🔗 Use when clicking Connect → Add a note';
+    }
+    
+    this.currentConfig.templateSettings.messageType = messageType;
+  }
+
+  async saveTemplateSettings() {
+    try {
+      this.showLoading(true);
+      
+      // Get selected message type from radio buttons
+      const selectedRadio = document.querySelector('input[name="messageType"]:checked');
+      const messageType = selectedRadio ? selectedRadio.value : 'newConnection';
+      
+      const templateSettings = {
+        ...this.currentConfig.templateSettings,
+        messageType: messageType,
+        companyName: document.getElementById('companyName').value.trim(),
+        positionTitle: document.getElementById('positionTitle').value.trim(),
+        opportunityType: document.getElementById('opportunityType').value.trim(),
+        timeline: document.getElementById('timeline').value.trim(),
+        jobLinks: document.getElementById('jobLinks').value.trim(),
+        recipientName: document.getElementById('recipientName').value.trim(),
+        autoDetectProfile: document.getElementById('auto-detect-profile').checked,
+        previewBeforeSend: document.getElementById('preview-before-send').checked
+      };
+
+      this.currentConfig.templateSettings = templateSettings;
+      const success = await this.saveConfiguration();
+      
+      if (success) {
+        this.showNotification('Template settings saved successfully!', 'success');
+        
+        // Send message to content script
+        try {
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (tabs[0] && tabs[0].url.includes('linkedin.com')) {
+            await chrome.tabs.sendMessage(tabs[0].id, {
+              action: 'reloadConfig',
+              config: this.currentConfig
+            });
+          }
+        } catch (error) {
+          console.log('[Popup] Could not send message to content script:', error.message);
+        }
+      }
+    } catch (error) {
+      console.error('[Popup] Error saving template settings:', error);
+      this.showNotification('Error saving template settings', 'error');
+    } finally {
+      this.showLoading(false);
+    }
+  }
+
+  resetTemplateFields() {
+    document.getElementById('companyName').value = '';
+    document.getElementById('positionTitle').value = 'Software Engineer Intern';
+    document.getElementById('timeline').value = 'Summer 2025';
+    document.getElementById('jobLinks').value = '';
+    document.getElementById('recipientName').value = '';
+    this.updateTemplatePreview();
+  }
+
+  copyMessageToClipboard() {
+    const selectedRadio = document.querySelector('input[name="messageType"]:checked');
+    const messageType = selectedRadio ? selectedRadio.value : 'newConnection';
+    const personalInfo = this.currentConfig.personalInfo;
+    const templateSettings = {
+      companyName: document.getElementById('companyName').value.trim(),
+      positionTitle: document.getElementById('positionTitle').value.trim(),
+      opportunityType: document.getElementById('opportunityType').value.trim(),
+      timeline: document.getElementById('timeline').value.trim(),
+      jobLinks: document.getElementById('jobLinks').value.trim(),
+      recipientName: document.getElementById('recipientName').value.trim()
+    };
+    
+    const templates = this.getMessageTemplates();
+    const template = templates[messageType];
+    
+    if (template) {
+      let message = template(personalInfo, templateSettings);
+      
+      // For new connection, remove any character count indicators
+      if (messageType === 'newConnection') {
+        const lines = message.split('\n');
+        if (lines[0].includes('chars]')) {
+          message = lines.slice(2).join('\n');
+        }
+      }
+      
+      // Copy to clipboard
+      navigator.clipboard.writeText(message).then(() => {
+        this.showNotification('Message copied to clipboard!', 'success');
+      }).catch(err => {
+        console.error('Failed to copy message:', err);
+        this.showNotification('Failed to copy message', 'error');
+      });
+    }
   }
 
   updateDefaultTemplate(templateName) {
@@ -326,173 +472,131 @@ class PopupManager {
   }
 
   updateTemplatePreview() {
-    const templateName = document.getElementById('default-template').value;
     const previewElement = document.getElementById('template-preview-text');
+    const charCounter = document.getElementById('char-counter');
+    const selectedRadio = document.querySelector('input[name="messageType"]:checked');
+    const messageType = selectedRadio ? selectedRadio.value : 'newConnection';
+    const personalInfo = this.currentConfig.personalInfo;
+    const templateSettings = {
+      companyName: document.getElementById('companyName').value.trim(),
+      positionTitle: document.getElementById('positionTitle').value.trim(),
+      opportunityType: document.getElementById('opportunityType').value.trim(),
+      timeline: document.getElementById('timeline').value.trim(),
+      jobLinks: document.getElementById('jobLinks').value.trim(),
+      recipientName: document.getElementById('recipientName').value.trim()
+    };
     
-    const templates = this.getDefaultTemplates();
-    const template = templates[templateName];
+    const templates = this.getMessageTemplates();
+    const template = templates[messageType];
     
     if (template) {
-      const personalInfo = this.currentConfig.personalInfo;
-      const sampleData = {
-        firstName: 'John',
-        company: 'TechCorp',
-        role: 'Software Engineer',
-        myName: personalInfo.name || 'Your Name',
-        myTitle: personalInfo.title || 'Your Title',
-        myBackground: personalInfo.background || 'Your Background'
-      };
+      let preview = template(personalInfo, templateSettings);
       
-      let preview = template.template;
-      Object.entries(sampleData).forEach(([key, value]) => {
-        const regex = new RegExp(`\\{${key}\\}`, 'g');
-        preview = preview.replace(regex, value);
-      });
+      // For new connection, remove the character count indicator from preview
+      if (messageType === 'newConnection') {
+        // Remove the character count line if present
+        const lines = preview.split('\n');
+        if (lines[0].includes('chars]')) {
+          preview = lines.slice(2).join('\n'); // Remove first two lines (indicator and empty line)
+        }
+        
+        // Update character counter
+        const charCount = preview.length;
+        if (charCount > 300) {
+          charCounter.innerHTML = `<span style="color: #dc3545;">⚠️ ${charCount}/300 chars</span>`;
+        } else {
+          charCounter.innerHTML = `<span style="color: #28a745;">✓ ${charCount}/300 chars</span>`;
+        }
+      } else {
+        charCounter.innerHTML = ''; // No limit for other message types
+      }
       
       previewElement.textContent = preview;
     } else {
-      previewElement.textContent = 'Template not found';
+      previewElement.textContent = 'Please fill in the required fields above...';
+      charCounter.innerHTML = '';
     }
   }
 
-  getDefaultTemplates() {
+  getMessageTemplates() {
     return {
-      engineer: {
-        name: "Software Engineer Template",
-        template: `Hi {firstName},
-
-I'm {myName}, a {myTitle} {myBackground}.
-
-I'd love to connect and learn about your journey as {role} at {company}. Would also appreciate any insights you might share about the interview process and work culture there.
-
-Eager to learn from experienced professionals like yourself!
-
-Best regards`
+      newConnection: (personalInfo, settings) => {
+        const company = settings.companyName || '[Company]';
+        const position = settings.positionTitle || 'Intern';
+        const timeline = settings.timeline || 'Summer 2025';
+        const fullName = `${personalInfo.firstName} ${personalInfo.lastName}`;
+        
+        // LinkedIn connection requests have a 300 character limit
+        // This template is optimized to be under 300 characters
+        return `Hi [Name],
+I'm interested in applying for the ${position} role at ${company} for ${timeline}. I noticed your experience at the company and would love to learn about your journey. I'd greatly appreciate a referral if possible.
+Best regards,
+${fullName}`;
       },
-      recruiter: {
-        name: "Recruiter/Hiring Manager Template",
-        template: `Hi {firstName},
+      
+      afterAcceptance: (personalInfo, settings) => {
+        const recipientName = settings.recipientName || '[Recipient\'s Name]';
+        const company = settings.companyName || '[Company]';
+        const opportunityType = settings.opportunityType || 'internship opportunities';
+        const timeline = settings.timeline || 'Summer 2025';
+        const jobLinks = settings.jobLinks || '[Insert job links]';
+        const fullName = `${personalInfo.firstName} ${personalInfo.lastName}`;
+        const resumeUrl = personalInfo.resumeUrl || '';
+        const degree = personalInfo.degree || 'MS in Computer Science';
+        const university = personalInfo.university || 'NYU';
+        
+        return `Hi ${recipientName},
 
-I noticed you're working as {role} at {company}. I'm actively exploring new opportunities in software development and would love to connect. I believe my skills could be a great fit for roles at {company}.
+Thank you so much for connecting! I hope you're doing well.
 
-Looking forward to connecting!
+I'm currently a graduate student at ${university} pursuing ${degree} and actively exploring ${opportunityType} for ${timeline}. I came across some exciting positions at ${company} that align perfectly with my background and interests.
 
-Best regards`
+${resumeUrl ? `I've included my resume for your reference: ${resumeUrl}\n\n` : ''}I would greatly appreciate any advice you might have on my profile or, if possible, a referral for these roles:
+
+${jobLinks}
+
+Thank you very much for your time and consideration. I look forward to hearing from you.
+
+Best regards,
+${fullName}`;
       },
-      student: {
-        name: "Student/Academic Template",
-        template: `Hi {firstName},
+      
+      alreadyConnected: (personalInfo, settings) => {
+        const company = settings.companyName || '[Company]';
+        const position = settings.positionTitle || 'Software Engineer Intern';
+        const timeline = settings.timeline || 'Summer 2025';
+        const jobLinks = settings.jobLinks || '';
+        const fullName = `${personalInfo.firstName} ${personalInfo.lastName}`;
+        const email = personalInfo.email || 'sa9082@nyu.edu';
+        const phone = personalInfo.phone || '6466335776';
+        
+        return `Hi [Name],
 
-I'm {myName}, a {myTitle} {myBackground}.
+I hope you're doing well.
 
-I'd love to connect and learn about your academic journey and any insights you might share about {role} opportunities.
+I'm reaching out because I'm interested in applying for the ${position} position at ${company} for ${timeline}. Having noticed your experience at the company, I was hoping to learn more about your journey there and gain insights into the work culture.
 
-Eager to learn from experienced professionals like yourself!
+I would greatly appreciate a referral for the position if you feel my profile would be a good fit.
 
-Best regards`
-      },
-      general: {
-        name: "General Professional Template",
-        template: `Hi {firstName},
+${jobLinks ? `Job Link: ${jobLinks}\n\n` : ''}Here are my details for your reference:
+• First Name: ${personalInfo.firstName}
+• Last Name: ${personalInfo.lastName}
+• Email: ${email}
+• Phone: ${phone}
 
-I'm {myName}, a {myTitle} {myBackground}.
+Thank you for your time and assistance.
 
-I'd love to connect and learn about your journey, work culture at {company}, and any insights you might share about the industry.
-
-Eager to learn from experienced professionals like yourself!
-
-Best regards`
-      },
-      sameCompany: {
-        name: "Same Company Template", 
-        template: `Hi {firstName},
-
-I see you work at {company} - I'm very interested in opportunities there! I'm {myName}, a {myTitle} {myBackground}.
-
-I'd love to connect and learn about your experience at {company} and any insights about the work culture and interview process.
-
-Looking forward to connecting!
-
-Best regards`
-      },
-      sameUniversity: {
-        name: "Alumni Template",
-        template: `Hi {firstName},
-
-Fellow alumni here! I'm {myName}, a {myTitle} {myBackground}.
-
-I'd love to connect and learn about your journey from university to {role} at {company}. Always great to connect with fellow alumni!
-
-Best regards`
+Best regards,
+${fullName}`;
       }
     };
   }
 
-  showCustomTemplateModal() {
-    document.getElementById('custom-template-modal').classList.remove('hidden');
-    document.getElementById('template-name').value = '';
-    document.getElementById('template-content').value = '';
-    document.getElementById('template-name').focus();
-  }
-
-  hideCustomTemplateModal() {
-    document.getElementById('custom-template-modal').classList.add('hidden');
-  }
-
-  async saveCustomTemplate() {
-    const name = document.getElementById('template-name').value.trim();
-    const content = document.getElementById('template-content').value.trim();
-    
-    if (!name || !content) {
-      this.showNotification('Please provide both name and content for the template', 'warning');
-      return;
-    }
-    
-    try {
-      if (!this.currentConfig.templateSettings.customTemplates) {
-        this.currentConfig.templateSettings.customTemplates = {};
-      }
-      
-      this.currentConfig.templateSettings.customTemplates[name] = {
-        name: name,
-        template: content,
-        custom: true,
-        created: Date.now()
-      };
-      
-      const success = await this.saveConfiguration();
-      
-      if (success) {
-        this.showNotification(`Custom template "${name}" saved successfully!`, 'success');
-        this.hideCustomTemplateModal();
-      }
-    } catch (error) {
-      console.error('[Popup] Error saving custom template:', error);
-      this.showNotification('Error saving custom template', 'error');
-    }
-  }
-
-  openTemplateManager() {
-    // For now, show a simple alert. In a future version, this could open a dedicated template management interface
-    const customTemplates = this.currentConfig.templateSettings.customTemplates || {};
-    const count = Object.keys(customTemplates).length;
-    
-    let message = `Template Management\n\nDefault Templates: 6\nCustom Templates: ${count}\n\n`;
-    
-    if (count > 0) {
-      message += 'Custom Templates:\n';
-      Object.keys(customTemplates).forEach(name => {
-        message += `• ${name}\n`;
-      });
-    }
-    
-    alert(message + '\nAdvanced template management coming in a future update!');
-  }
 
   async exportSettings() {
     try {
       const exportData = {
-        version: '2.1',
+        version: '3.0',
         exportDate: new Date().toISOString(),
         config: this.currentConfig
       };

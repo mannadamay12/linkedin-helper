@@ -43,28 +43,38 @@
         
         <form id="personal-form">
           <div class="form-group">
-            <label for="name">Your Name</label>
-            <input type="text" id="name" placeholder="e.g., John Smith" maxlength="50">
+            <label for="firstName">First Name</label>
+            <input type="text" id="firstName" placeholder="e.g., Sachin" maxlength="50" required>
           </div>
           
           <div class="form-group">
-            <label for="title">Your Title/Role</label>
-            <input type="text" id="title" placeholder="e.g., Software Engineer at Google" maxlength="100">
+            <label for="lastName">Last Name</label>
+            <input type="text" id="lastName" placeholder="e.g., Adlakha" maxlength="50" required>
           </div>
           
           <div class="form-group">
-            <label for="background">Your Background</label>
-            <input type="text" id="background" placeholder="e.g., passionate about AI" maxlength="100">
+            <label for="email">Email</label>
+            <input type="email" id="email" placeholder="e.g., sa9082@nyu.edu" maxlength="100" required>
           </div>
           
           <div class="form-group">
-            <label for="university">University (Optional)</label>
-            <input type="text" id="university" placeholder="e.g., Stanford University" maxlength="100">
+            <label for="phone">Phone Number</label>
+            <input type="tel" id="phone" placeholder="e.g., 6466335776" maxlength="20">
           </div>
           
           <div class="form-group">
-            <label for="location">Location (Optional)</label>
-            <input type="text" id="location" placeholder="e.g., San Francisco, CA" maxlength="50">
+            <label for="university">University</label>
+            <input type="text" id="university" placeholder="e.g., NYU" maxlength="100">
+          </div>
+          
+          <div class="form-group">
+            <label for="degree">Degree Program</label>
+            <input type="text" id="degree" placeholder="e.g., MS in Computer Science" maxlength="100">
+          </div>
+          
+          <div class="form-group">
+            <label for="resumeUrl">Resume URL</label>
+            <input type="url" id="resumeUrl" placeholder="e.g., https://drive.google.com/file/d/..." maxlength="500">
           </div>
           
           <div class="form-actions">
@@ -76,7 +86,7 @@
         <div class="info-box">
           <div class="info-title">💡 How It Works</div>
           <div class="info-text">
-            Your information will be used in message templates as variables like {myName}, {myTitle}, {myBackground}.
+            Your information will be automatically inserted into message templates based on the connection type you choose.
           </div>
         </div>
       </div>
@@ -86,22 +96,81 @@
         <div class="section-title">Message Templates</div>
         
         <div class="template-selector">
-          <label for="default-template">Default Template</label>
-          <select id="default-template">
-            <option value="general">General Professional</option>
-            <option value="engineer">Software Engineer</option>
-            <option value="recruiter">Recruiter/Hiring Manager</option>
-            <option value="student">Student/Academic</option>
-            <option value="sameCompany">Same Company</option>
-            <option value="sameUniversity">Alumni</option>
-          </select>
+          <label style="display: block; margin-bottom: 10px; font-weight: 600;">Message Type</label>
+          
+          <!-- Using styled radio buttons instead of problematic select -->
+          <div class="message-type-options">
+            <label class="message-type-option">
+              <input type="radio" name="messageType" value="newConnection" id="msg-new" checked>
+              <span class="option-label">
+                <span class="option-icon">🔗</span>
+                <span class="option-text">New Connection Request</span>
+              </span>
+            </label>
+            
+            <label class="message-type-option">
+              <input type="radio" name="messageType" value="afterAcceptance" id="msg-after">
+              <span class="option-label">
+                <span class="option-icon">✅</span>
+                <span class="option-text">Message After Acceptance</span>
+              </span>
+            </label>
+            
+            <label class="message-type-option">
+              <input type="radio" name="messageType" value="alreadyConnected" id="msg-already">
+              <span class="option-label">
+                <span class="option-icon">💬</span>
+                <span class="option-text">Already Connected</span>
+              </span>
+            </label>
+          </div>
+          
+          <div class="template-help-text" style="margin-top: 10px; font-size: 11px; color: #666;">
+            <div id="template-usage-hint">🔗 Use when clicking Connect → Add a note</div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="companyName">Company Name</label>
+          <input type="text" id="companyName" placeholder="e.g., Fiserv, Uber, Ontra" maxlength="100">
+        </div>
+        
+        <div class="form-group">
+          <label for="positionTitle">Position Title</label>
+          <input type="text" id="positionTitle" placeholder="e.g., Summer Intern 2025, Software Engineer" maxlength="200">
+        </div>
+        
+        <div class="form-group">
+          <label for="opportunityType">Opportunity Type</label>
+          <input type="text" id="opportunityType" placeholder="e.g., internship opportunities, full-time roles" maxlength="100" value="internship opportunities">
+          <div style="font-size: 11px; color: #666; margin-top: 4px;">
+            Examples: "internship opportunities", "full-time roles", "new grad positions"
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label for="timeline">Timeline/Period</label>
+          <input type="text" id="timeline" placeholder="e.g., Summer 2025, Fall 2024, starting May 2025" maxlength="100" value="Summer 2025">
+          <div style="font-size: 11px; color: #666; margin-top: 4px;">
+            Examples: "Summer 2025", "Fall 2024", "starting January 2025", "2025"
+          </div>
+        </div>
+        
+        <div class="form-group" id="jobLinksGroup">
+          <label for="jobLinks">Job Link(s)</label>
+          <textarea id="jobLinks" rows="3" placeholder="Enter job links (one per line)"></textarea>
+        </div>
+        
+        <div class="form-group" id="recipientNameGroup" style="display: none;">
+          <label for="recipientName">Recipient's Name</label>
+          <input type="text" id="recipientName" placeholder="Will be auto-filled from LinkedIn profile" maxlength="100">
         </div>
 
         <div class="template-options">
           <label class="checkbox-wrapper">
-            <input type="checkbox" id="auto-select-template" checked>
+            <input type="checkbox" id="auto-detect-profile" checked>
             <span class="checkmark"></span>
-            Auto-select template based on profile
+            Auto-detect profile information
           </label>
           <label class="checkbox-wrapper">
             <input type="checkbox" id="preview-before-send" checked>
@@ -111,47 +180,39 @@
         </div>
 
         <div class="template-preview">
-          <div class="preview-title">Template Preview</div>
+          <div class="preview-title">
+            Message Preview
+            <span id="char-counter" style="float: right; font-size: 12px; color: #666;"></span>
+          </div>
           <div id="template-preview-text" class="preview-text">
-            Select a template to see preview...
+            Fill in the fields above to see the message preview...
           </div>
         </div>
 
         <div class="template-actions">
-          <button class="btn btn-primary" id="add-custom-template">+ Add Custom Template</button>
-          <button class="btn btn-secondary" id="manage-templates">Manage Templates</button>
+          <button class="btn btn-primary" id="save-template-settings">Save Template Settings</button>
+          <button class="btn btn-secondary" id="copy-message">Copy Message</button>
+          <button class="btn btn-secondary" id="reset-template">Reset Fields</button>
         </div>
 
-        <!-- Custom Template Modal (Hidden) -->
-        <div id="custom-template-modal" class="modal hidden">
-          <div class="modal-content">
-            <div class="modal-header">
-              <span class="modal-title">Create Custom Template</span>
-              <button class="modal-close">&times;</button>
-            </div>
-            <div class="modal-body">
-              <div class="form-group">
-                <label for="template-name">Template Name</label>
-                <input type="text" id="template-name" placeholder="e.g., Casual Outreach">
-              </div>
-              <div class="form-group">
-                <label for="template-content">Template Content</label>
-                <textarea id="template-content" rows="6" placeholder="Hi {firstName}! I'm {myName}..."></textarea>
-              </div>
-              <div class="available-variables">
-                <strong>Available Variables:</strong>
-                <span class="variable">{firstName}</span>
-                <span class="variable">{company}</span>
-                <span class="variable">{role}</span>
-                <span class="variable">{myName}</span>
-                <span class="variable">{myTitle}</span>
-                <span class="variable">{myBackground}</span>
-              </div>
-            </div>
-            <div class="modal-footer">
-              <button class="btn btn-primary" id="save-custom-template">Save Template</button>
-              <button class="btn btn-secondary" id="cancel-custom-template">Cancel</button>
-            </div>
+        <div class="info-box" style="margin-top: 20px;">
+          <div class="info-title">📌 How to Use Each Message Type</div>
+          <div class="info-text" style="line-height: 1.6;">
+            <strong>🔗 New Connection Request:</strong><br>
+            • Click "Connect" on someone's profile<br>
+            • Click "Add a note" when the modal appears<br>
+            • Message will auto-fill with their name detected<br><br>
+            
+            <strong>✅ Message After Acceptance:</strong><br>
+            • Go to LinkedIn messaging or open a chat<br>
+            • Click the ✉️ button (appears on messaging pages)<br>
+            • Or use keyboard shortcut: Ctrl+Shift+M (Cmd+Shift+M on Mac)<br>
+            • Message will auto-fill with recipient's name<br><br>
+            
+            <strong>💬 Already Connected:</strong><br>
+            • Same as above - open their message thread<br>
+            • Click ✉️ button or use Ctrl+Shift+M<br>
+            • Includes your contact details for referral
           </div>
         </div>
       </div>
@@ -217,7 +278,7 @@
         </div>
 
         <div class="footer-info">
-          <div class="version">v2.1 - Template System</div>
+          <div class="version">v3.0 - Multi-Template System</div>
           <div class="privacy">No data sent to external servers</div>
         </div>
       </div>
