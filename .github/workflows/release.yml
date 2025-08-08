@@ -1,0 +1,88 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Build extension
+        run: npm run build:prod
+        
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body: |
+            ## 🚀 LinkedIn Connection Helper ${{ github.ref_name }}
+            
+            ### 📦 What's New
+            - Enhanced LinkedIn profile detection
+            - Improved message template system
+            - Better error handling and user feedback
+            - Performance optimizations
+            
+            ### 🐛 Bug Fixes
+            - Fixed connection modal detection issues
+            - Resolved template variable substitution problems
+            - Improved messaging interface compatibility
+            
+            ### 🔧 Technical Improvements
+            - Code minification for production builds
+            - Enhanced build system
+            - Better memory management
+            - Improved DOM element detection
+            
+            ### 📋 Installation
+            1. Download the extension files from the artifacts below
+            2. Extract the contents
+            3. Open Chrome and go to `chrome://extensions/`
+            4. Enable "Developer mode"
+            5. Click "Load unpacked" and select the extracted folder
+            
+            ### 🔗 Download
+            Check the artifacts below for the built extension files.
+            
+            ---
+            *Automatically generated release*
+          draft: false
+          prerelease: false
+          
+      - name: Upload Extension Files
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./dist/linkedin-helper-${{ github.ref_name }}.zip
+          asset_name: linkedin-helper-${{ github.ref_name }}.zip
+          asset_content_type: application/zip
+          
+      - name: Upload Extension Directory
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./dist/
+          asset_name: linkedin-helper-${{ github.ref_name }}-files.zip
+          asset_content_type: application/zip

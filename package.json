@@ -1,0 +1,42 @@
+{
+  "name": "linkedin-connection-helper",
+  "version": "5.0.1",
+  "description": "A browser extension that automates personalized connection messages on LinkedIn with intelligent profile detection and message customization.",
+  "main": "content.js",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "build:prod": "node scripts/build.js --production",
+    "build:dev": "node scripts/build.js --development",
+    "release": "node scripts/release.js",
+    "clean": "node scripts/clean.js",
+    "validate": "node scripts/validate.js",
+    "zip": "node scripts/zip.js"
+  },
+  "keywords": [
+    "chrome-extension",
+    "linkedin",
+    "automation",
+    "networking",
+    "browser-extension"
+  ],
+  "author": "Sachin Adlakha, Adamay Mann",
+  "license": "MIT",
+  "devDependencies": {
+    "archiver": "^6.0.1",
+    "chalk": "^4.1.2",
+    "fs-extra": "^11.1.1",
+    "minify": "^9.1.0",
+    "replace-in-file": "^6.3.5"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sachin1801/linkedin-helper.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Sachin1801/linkedin-helper/issues"
+  },
+  "homepage": "https://github.com/Sachin1801/linkedin-helper#readme"
+}
